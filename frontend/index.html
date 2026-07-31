@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>社内ナレッジAIチャットボット（Basic）</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", system-ui, sans-serif;
+    background: #f3f6f8;
+    color: #22303a;
+  }
+  .page { max-width: 640px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 24px 16px 12px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; color: #5a6b74; }
+  main { flex: 1; padding: 0 16px 16px; display: flex; flex-direction: column; }
+  #log { flex: 1; background: #fff; border-radius: 12px; padding: 16px; overflow-y: auto; min-height: 320px; max-height: 60vh; box-shadow: 0 4px 16px rgba(20,40,50,0.08); }
+  .row { margin-bottom: 12px; display: flex; }
+  .row.user { justify-content: flex-end; }
+  .bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .row.user .bubble { background: #2f6fed; color: #fff; }
+  .row.bot .bubble { background: #eef2f4; color: #22303a; }
+  .row.error .bubble { background: #fdecea; color: #a12622; }
+  form { display: flex; gap: 8px; margin-top: 12px; }
+  input { flex: 1; border: 1px solid #d5dee2; border-radius: 999px; padding: 10px 16px; font-size: 14px; }
+  button { border: none; border-radius: 999px; padding: 10px 18px; background: #2f6fed; color: #fff; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>社内ナレッジAIチャットボット（Basic）</h1>
+    <p>経費精算・在宅勤務など、社内規定に関する質問にお答えします</p>
+  </header>
+  <main>
+    <div id="log"></div>
+    <form id="form">
+      <input id="question" placeholder="質問を入力..." autocomplete="off">
+      <button type="submit">送信</button>
+    </form>
+  </main>
+</div>
+<script>
+  const API_ENDPOINT = "__API_ENDPOINT__";
+  const log = document.getElementById("log");
+  const form = document.getElementById("form");
+  const input = document.getElementById("question");
+
+  function addBubble(role, text) {
+    const row = document.createElement("div");
+    row.className = "row " + role;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    addBubble("user", question);
+    input.value = "";
+    form.querySelector("button").disabled = true;
+
+    try {
+      const res = await fetch(API_ENDPOINT + "/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      let text = data.answer;
+      if (data.sources && data.sources.length) {
+        text += "\n\n出典:\n" + data.sources.map((s) => "・" + s).join("\n");
+      }
+      addBubble("bot", text);
+    } catch (err) {
+      addBubble("error", "エラー: " + err.message);
+    } finally {
+      form.querySelector("button").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
