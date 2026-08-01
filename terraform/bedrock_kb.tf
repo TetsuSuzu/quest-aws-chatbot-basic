@@ -40,6 +40,18 @@ data "aws_iam_policy_document" "kb_permissions" {
     resources = [var.embedding_model_arn]
   }
 
+  # スキャン画像PDF(試験問題など、テキストレイヤーを持たないPDF)を解析するための
+  # マルチモーダルパースに使う。generation_model_arnはクロスリージョンinference profileの
+  # ため、profile ARN自体とルーティング先のfoundation-model ARNの両方への権限が必要
+  statement {
+    sid     = "InvokeMultimodalParsingModel"
+    actions = ["bedrock:InvokeModel", "bedrock:GetInferenceProfile"]
+    resources = [
+      var.generation_model_arn,
+      "arn:aws:bedrock:*::foundation-model/*",
+    ]
+  }
+
   statement {
     sid       = "S3VectorBucketReadAndWritePermission"
     actions   = ["s3vectors:PutVectors", "s3vectors:GetVectors", "s3vectors:DeleteVectors", "s3vectors:QueryVectors", "s3vectors:GetIndex"]
@@ -95,6 +107,23 @@ resource "aws_bedrockagent_data_source" "documents" {
 
     s3_configuration {
       bucket_arn = aws_s3_bucket.documents.arn
+    }
+  }
+
+  # スキャン画像PDF(テキストレイヤーなし)も取り込めるよう、ビジョン対応モデルで
+  # 画像内容をテキスト化してから埋め込む(標準のテキスト抽出だけでは
+  # 「no text content found」として無視されてしまう)
+  vector_ingestion_configuration {
+    parsing_configuration {
+      parsing_strategy = "BEDROCK_FOUNDATION_MODEL"
+
+      bedrock_foundation_model_configuration {
+        model_arn = var.generation_model_arn
+
+        parsing_prompt {
+          parsing_prompt_string = "Extract and transcribe all text and visual content from the document."
+        }
+      }
     }
   }
 }
