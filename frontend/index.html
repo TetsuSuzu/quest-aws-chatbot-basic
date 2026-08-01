@@ -133,21 +133,20 @@
   #log::-webkit-scrollbar { width: 8px; }
   #log::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 8px; }
 
-  .empty {
-    margin: auto 0;
+  .greeting {
     text-align: center;
     color: var(--muted);
-    padding: 0 20px;
+    font-size: 13px;
+    padding: 12px 0 2px;
   }
-
-  .empty .icon { font-size: 30px; margin-bottom: 10px; }
-  .empty p { font-size: 13.5px; margin: 0 0 16px; }
 
   .suggestions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    justify-content: center;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
   }
 
   .chip {
@@ -155,8 +154,8 @@
     background: rgba(255, 255, 255, 0.04);
     color: var(--ink);
     border-radius: 999px;
-    padding: 8px 14px;
-    font-size: 12.5px;
+    padding: 7px 13px;
+    font-size: 12px;
     cursor: pointer;
     transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
   }
@@ -326,15 +325,12 @@
   <main>
     <div id="shell">
       <div id="log">
-        <div class="empty" id="empty">
-          <div class="icon">💬</div>
-          <p>こんにちは。社内規定について、何でもお気軽にどうぞ。</p>
-          <div class="suggestions">
-            <button class="chip" type="button" data-q="経費精算はどのように申請しますか？">経費精算はどのように申請しますか？</button>
-            <button class="chip" type="button" data-q="在宅勤務は週に何日まで使えますか？">在宅勤務は週に何日まで使えますか？</button>
-            <button class="chip" type="button" data-q="経費精算の申請期限はいつまでですか？">経費精算の申請期限はいつまでですか？</button>
-          </div>
-        </div>
+        <p class="greeting">こんにちは。社内規定について、何でもお気軽にどうぞ。</p>
+      </div>
+      <div class="suggestions">
+        <button class="chip" type="button" data-q="経費精算はどのように申請しますか？">経費精算はどのように申請しますか？</button>
+        <button class="chip" type="button" data-q="在宅勤務は週に何日まで使えますか？">在宅勤務は週に何日まで使えますか？</button>
+        <button class="chip" type="button" data-q="経費精算の申請期限はいつまでですか？">経費精算の申請期限はいつまでですか？</button>
       </div>
       <form id="form">
         <input id="question" placeholder="質問を入力..." autocomplete="off">
@@ -347,7 +343,6 @@
 <script>
   const API_ENDPOINT = "__API_ENDPOINT__";
   const log = document.getElementById("log");
-  const empty = document.getElementById("empty");
   const form = document.getElementById("form");
   const input = document.getElementById("question");
   const button = form.querySelector("button");
@@ -359,8 +354,6 @@
   }
 
   function addBubble(role, text, sources) {
-    if (empty) empty.remove();
-
     const row = document.createElement("div");
     row.className = "row " + role;
 
