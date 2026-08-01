@@ -19,13 +19,36 @@
 ### 推奨アーキテクチャ（S3 Vectors版）
 
 ```mermaid
-flowchart LR
-    User["利用者（参加者）"] --> Console["Bedrockコンソール\nKnowledge Base テスト画面"]
-    Console --> KB["Amazon Bedrock\nKnowledge Base"]
-    KB --> S3V[("S3 Vectors\nベクトルバケット")]
-    KB --> Model["基盤モデル\n(Claude等)"]
-    S3["Amazon S3\n(ドキュメント格納)"] -- "同期(Sync)" --> KB
+flowchart TB
+    subgraph Client["利用者"]
+        Participant["参加者\n(構築・動作確認)"]
+        WebUser["ブラウザ利用者\n(オプション)"]
+    end
+
+    Console["Bedrockコンソール\nKnowledge Base テスト画面"]
+
+    subgraph OptionalWeb["オプション: 簡易Webフロント"]
+        S3Front["S3静的website hosting\n(frontend/index.html)"]
+        APIGW["API Gateway (HTTP API)"]
+        Lambda["Lambda: ask"]
+    end
+
+    subgraph BedrockBox["Amazon Bedrock"]
+        KB["Knowledge Base"]
+        Model["基盤モデル\n(Claude / Titan Embeddings)"]
+    end
+
+    S3Docs[("Amazon S3\nドキュメント格納")]
+    S3V[("S3 Vectors\nベクトルバケット・インデックス")]
+
+    Participant --> Console --> KB
+    WebUser -.-> S3Front -.-> APIGW -.-> Lambda -.-> KB
+    S3Docs -- "同期(Sync)" --> KB
+    KB --> S3V
+    KB --> Model
 ```
+
+実線＝必須構成（マネジメントコンソールだけで完結）、点線＝オプションのWebフロント（`terraform/`で検証済み、Amplifyではなく低コストなS3静的website hostingを採用）。
 
 ### 使用するAWSサービス／リソース一覧
 
@@ -46,40 +69,63 @@ flowchart LR
 - ❌ APIキー・認証情報のハードコーディング／外部共有
 - ❌ ドキュメント用バケットとベクトルバケットの取り違え（役割を明確に分ける）
 
-## 手順（コンソール操作）
+## 手順（マネジメントコンソール操作）
+
+※ コンソールの画面・メニュー名はAWSのアップデートにより変わることがある。表示が異なる場合は名称の近いメニューを探すこと。
 
 ### 1. S3バケットを作成し、ドキュメントをアップロードする
 
-1. S3コンソールでバケットを新規作成する（例: `<チーム名>-documents`）。パブリックアクセスはブロックしたままにする
-2. 検索させたい社内ドキュメント（Markdown/PDF/Word等）をアップロードする。サンプルとして本リポジトリの`sample-docs/`を使ってもよい
+1. マネジメントコンソールで **S3** を開く
+2. 左メニュー「General purpose buckets」→ **「バケットを作成」**
+3. バケット名を入力（例: `<チーム名>-documents`、全世界で一意な名前が必要）。リージョンはハンズオン共通のリージョン（例: 東京 ap-northeast-1）を選択
+4. 「このバケットのブロックパブリックアクセス設定」は**デフォルトのまま（すべてブロック）**にする
+5. 「バケットを作成」をクリック
+6. 作成したバケットを開き、**「アップロード」→「ファイルを追加」**で社内ドキュメント（Markdown/PDF/Word等）を選択し、**「アップロード」**を実行する。サンプルとして本リポジトリの`sample-docs/`（経費精算規定・在宅勤務規定）を使ってもよい
 
 ### 2. S3 Vectorsのベクトルバケット・インデックスを作成する
 
-1. S3コンソールの「Vector buckets」からベクトルバケットを新規作成する
-2. 作成したベクトルバケット内に「ベクトルインデックス」を作成する
-   - **次元数（dimension）**: 使用する埋め込みモデルに合わせる（下記「補足」参照）
-   - **距離指標**: コサイン類似度（cosine）でよい
-   - **メタデータ設定**: `non-filterable metadata keys` に `AMAZON_BEDROCK_TEXT` と `AMAZON_BEDROCK_METADATA` の2つを追加する（★詳細は下記トラブルシュート参照。ここを省略すると同期がほぼ全件失敗する）
+1. S3コンソールの左メニュー「Vector buckets」を開く（「General purpose buckets」と並んで表示される）
+2. **「ベクトルバケットを作成」**をクリックし、バケット名を入力（例: `<チーム名>-vectors`）。暗号化はデフォルト（SSE-S3）のままでよい → 作成
+3. 作成したベクトルバケットを開き、**「インデックス」タブ →「ベクトルインデックスを作成」**
+4. 以下を入力する
+   - **インデックス名**: 任意（例: `kb-index`）
+   - **次元数（dimension）**: 使用する埋め込みモデルに合わせる。Titan Text Embeddings V2なら`1024`（下記「補足」参照）
+   - **距離指標（distance metric）**: コサイン類似度（cosine）でよい
+   - **メタデータ設定（non-filterable metadata keys）**: `AMAZON_BEDROCK_TEXT` と `AMAZON_BEDROCK_METADATA` の**2つを両方**追加する（★重要。詳細は下記「つまづきポイント」参照。ここを省略すると同期がほぼ全件失敗する）
+5. 「ベクトルインデックスを作成」をクリック
 
 ### 3. Bedrockのモデルアクセスを有効化する
 
-Bedrockコンソール「モデルアクセス」から、埋め込みモデル（Titan Embed Text V2等）と回答生成モデル（Claude等）の両方を有効化する。
+1. マネジメントコンソールで **Amazon Bedrock** を開く
+2. 左メニュー下部の**「モデルアクセス」**をクリック
+3. **「モデルアクセスを管理」**（または「特定のモデルを有効にする」）をクリック
+4. 埋め込みモデル（**Titan Text Embeddings V2**）と回答生成モデル（**Claude**、選択可能なバージョンでよい）にチェックを入れる
+5. 「次へ」→ 利用規約を確認し**「送信」**。ステータスが「アクセス許可済み」になるまで数分待つ
 
 ### 4. Bedrock Knowledge Baseを作成する
 
-1. Bedrockコンソール「Knowledge Bases」から新規作成
-2. データソースに手順1で作成したS3バケットを指定
-3. 埋め込みモデルを選択（手順2のベクトルインデックスと同じ次元数のもの）
-4. ベクトルストアに「S3 Vectors」を選択し、手順2で作成したベクトルインデックスを指定
-5. IAMロールは新規作成（自動的に必要な権限が付与される）を選ぶか、最小権限のロールを手動で用意する
+1. Bedrockコンソール左メニューの**「Knowledge Bases」**（Builder toolsの中）を開き、**「作成」→「ナレッジベースを作成」**
+2. ナレッジベース名を入力
+3. **IAM権限**: 「新しいサービスロールを作成して使用する」（推奨、必要な権限が自動付与される）を選択
+4. データソースのタイプで**「S3」**を選択 → 次へ
+5. データソース名を入力し、**S3 URI**で手順1で作成したバケットを指定（「参照」から選択可能）
+6. チャンク戦略・パース戦略はデフォルトのままでよい → 次へ
+7. **埋め込みモデル**: 「Titan Text Embeddings V2」を選択し、埋め込みの次元数を手順2のベクトルインデックスと**同じ値（例: 1024）**に設定する
+8. **ベクトルストア**: 「既存のベクトルストアを使用する」→ ストアの種類で**「Amazon S3 Vectors」**を選択し、手順2で作成したベクトルバケット・ベクトルインデックスを指定する
+9. 「次へ」で設定内容を確認し、**「ナレッジベースを作成」**をクリック（作成に数十秒〜1分程度かかる）
 
 ### 5. データソースを同期（Sync）する
 
-Knowledge Base作成後、データソースの詳細画面から「同期」を実行する。ステータスが「完了」になるまで待つ（ドキュメント数が少なければ数十秒程度）。
+1. 作成したKnowledge Baseの詳細画面を開く
+2. 「データソース」欄で対象のデータソースにチェックを入れ、**「同期」**ボタンをクリック
+3. ステータスが「同期中」→「使用可能」（Available/Ready）になるまで待つ（ドキュメント数が少なければ数十秒程度）
 
 ### 6. テスト画面で動作確認する
 
-Knowledge Baseの「テスト」画面でチャット形式の質問を入力し、アップロードしたドキュメントの内容に基づいて回答が返ることを確認する。回答と一緒に出典（ソースドキュメント）も表示されることを確認する。
+1. Knowledge Base詳細画面の右側（または上部）にある**「ナレッジベースをテスト」**パネルを開く
+2. 生成に使うモデル（Claude等）を選択する
+3. 質問（例: 「在宅勤務は週に何日まで使えますか？」）を入力し、送信する
+4. アップロードしたドキュメントの内容に基づいて回答が返ること、回答と一緒に**出典（ソースの詳細）**も表示されることを確認する
 
 ## つまづきポイントとヒント
 
@@ -126,15 +172,7 @@ Knowledge Baseの「テスト」画面でチャット形式の質問を入力し
 
 ## オプション: S3でシンプルなWebフロントを追加する
 
-Bedrockコンソールのテストチャットだけでなく、ブラウザからも質問できるようにしたい場合は、**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントを追加できる（`terraform/`に検証済みで含まれている）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
-
-```mermaid
-flowchart LR
-    User["利用者"] --> S3Front["S3静的website hosting\n(frontend/index.html)"]
-    S3Front --> APIGW["API Gateway (HTTP API)"]
-    APIGW --> Lambda["Lambda: ask"]
-    Lambda --> KB["Bedrock Knowledge Base"]
-```
+Bedrockコンソールのテストチャットだけでなく、ブラウザからも質問できるようにしたい場合は、**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントを追加できる（`terraform/`に検証済みで含まれている、構成図は上記「推奨アーキテクチャ」の点線部分）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
 
 - `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
