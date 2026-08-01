@@ -210,6 +210,16 @@
     line-height: 1.6;
   }
 
+  .row.bot:has(.mermaid) .bubble { max-width: 92%; }
+
+  .mermaid {
+    margin-top: 10px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 10px;
+    overflow-x: auto;
+  }
+
   .typing .bubble { display: flex; align-items: center; gap: 5px; padding: 14px 16px; }
   .typing .dot {
     width: 6px;
@@ -309,7 +319,10 @@
     <footer>Amazon Bedrock Knowledge Base（S3 Vectors）搭載</footer>
   </main>
 </div>
-<script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, theme: "default" });
+
   const API_ENDPOINT = "__API_ENDPOINT__";
   const log = document.getElementById("log");
   const form = document.getElementById("form");
@@ -333,7 +346,23 @@
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = text;
+
+    // 回答内の ```mermaid ...``` ブロックを検出し、図として描画する
+    const mermaidNodes = [];
+    const segments = text.split(/```mermaid\n?([\s\S]*?)```/g);
+    segments.forEach((segment, i) => {
+      if (i % 2 === 1) {
+        const diagram = document.createElement("div");
+        diagram.className = "mermaid";
+        diagram.textContent = segment.trim();
+        bubble.appendChild(diagram);
+        mermaidNodes.push(diagram);
+      } else if (segment.trim()) {
+        const textBlock = document.createElement("div");
+        textBlock.textContent = segment.trim();
+        bubble.appendChild(textBlock);
+      }
+    });
 
     if (sources && sources.length) {
       const src = document.createElement("div");
@@ -346,6 +375,11 @@
     row.appendChild(bubble);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
+
+    if (mermaidNodes.length) {
+      mermaid.run({ nodes: mermaidNodes }).catch(() => {});
+    }
+
     return row;
   }
 

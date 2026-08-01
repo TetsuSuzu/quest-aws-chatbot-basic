@@ -9,6 +9,16 @@ bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
 
+# $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
+PROMPT_TEMPLATE = """あなたは社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
+
+手続き・申請フロー・プロセスに関する質問（例:「〜の申請手順は？」「〜の流れを教えて」）の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。
+
+検索結果:
+$search_results$
+
+$output_format_instructions$"""
+
 
 def _retrieve_and_generate(question: str, session_id: str | None):
     kwargs = {}
@@ -22,6 +32,9 @@ def _retrieve_and_generate(question: str, session_id: str | None):
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KNOWLEDGE_BASE_ID,
                 "modelArn": MODEL_ARN,
+                "generationConfiguration": {
+                    "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
+                },
             },
         },
         **kwargs,
