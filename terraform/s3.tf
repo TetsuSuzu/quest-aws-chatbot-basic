@@ -24,11 +24,24 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
   }
 }
 
-resource "aws_s3_object" "sample_docs" {
-  for_each = fileset("${path.module}/../sample-docs", "*.md")
+locals {
+  # sample-docs配下を再帰的に取り込む（gov/配下の観光庁PDFも含む）。
+  # README.md（出典管理用のメタ文書）はRAGデータではないため除外する
+  sample_doc_files = setsubtract(
+    setunion(
+      fileset("${path.module}/../sample-docs", "**/*.md"),
+      fileset("${path.module}/../sample-docs", "**/*.pdf"),
+    ),
+    fileset("${path.module}/../sample-docs", "**/README.md")
+  )
+}
 
-  bucket = aws_s3_bucket.documents.id
-  key    = each.value
-  source = "${path.module}/../sample-docs/${each.value}"
-  etag   = filemd5("${path.module}/../sample-docs/${each.value}")
+resource "aws_s3_object" "sample_docs" {
+  for_each = local.sample_doc_files
+
+  bucket       = aws_s3_bucket.documents.id
+  key          = each.value
+  source       = "${path.module}/../sample-docs/${each.value}"
+  etag         = filemd5("${path.module}/../sample-docs/${each.value}")
+  content_type = endswith(each.value, ".pdf") ? "application/pdf" : "text/markdown"
 }
