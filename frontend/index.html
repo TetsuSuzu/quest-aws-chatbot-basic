@@ -299,47 +299,6 @@
     .bubble { max-width: 85%; font-size: 16px; }
   }
 
-  /* 例題プロンプト: #logの中に入れず、独立した静的なブロックとして常時表示する
-     (以前、#log内に中央寄せで置いていた際に入力欄と重なる不具合が出たための対応) */
-  .suggestions {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .suggestion-group {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .suggestion-label {
-    font-size: 12px;
-    color: var(--muted);
-    min-width: 84px;
-    flex-shrink: 0;
-  }
-
-  .chip {
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--ink);
-    border-radius: 999px;
-    padding: 6px 13px;
-    font-size: 12.5px;
-    cursor: pointer;
-    transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
-  }
-
-  .chip:hover {
-    background: rgba(109, 141, 255, 0.15);
-    border-color: rgba(109, 141, 255, 0.4);
-    transform: translateY(-1px);
-  }
 </style>
 </head>
 <body>
@@ -357,23 +316,6 @@
     <div id="shell">
       <div id="log">
         <p class="greeting">こんにちは。社内規定について、何でもお気軽にどうぞ。</p>
-      </div>
-      <div class="suggestions">
-        <div class="suggestion-group">
-          <span class="suggestion-label">社内業務</span>
-          <button class="chip" type="button" data-q="経費精算はどのように申請すればいいですか？">経費精算の申請方法</button>
-          <button class="chip" type="button" data-q="在宅勤務は週に何日まで使えますか？">在宅勤務の利用日数</button>
-        </div>
-        <div class="suggestion-group">
-          <span class="suggestion-label">旅行業の規定</span>
-          <button class="chip" type="button" data-q="標準旅行業約款とは何ですか？">標準旅行業約款とは</button>
-          <button class="chip" type="button" data-q="オンライン旅行取引の表示等に関するガイドライン（OTAガイドライン）ではどのような表示が求められていますか？">OTAガイドライン</button>
-        </div>
-        <div class="suggestion-group">
-          <span class="suggestion-label">試験過去問</span>
-          <button class="chip" type="button" data-q="令和4年度の試験問題にはどのような内容が含まれていますか？">令和4年度試験の内容</button>
-          <button class="chip" type="button" data-q="地域限定旅行業務取扱管理者試験の合格基準は何点ですか？">試験の合格基準</button>
-        </div>
       </div>
       <form id="form">
         <input id="question" placeholder="質問を入力..." autocomplete="off">
@@ -535,10 +477,6 @@
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     ask(input.value.trim());
-  });
-
-  document.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => ask(chip.dataset.q));
   });
 </script>
 </body>
