@@ -320,8 +320,16 @@
   </main>
 </div>
 <script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  mermaid.initialize({ startOnLoad: false, theme: "default" });
+  // CDN読み込み失敗時にチャット全体が止まらないよう、静的importではなく
+  // 動的importで読み込み、失敗時はダイアグラム機能だけを諦める
+  let mermaid = null;
+  try {
+    const mod = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+    mermaid = mod.default;
+    mermaid.initialize({ startOnLoad: false, theme: "default" });
+  } catch (e) {
+    console.warn("mermaid.js の読み込みに失敗しました。フローチャートはコードのまま表示されます。", e);
+  }
 
   const API_ENDPOINT = "__API_ENDPOINT__";
   const log = document.getElementById("log");
@@ -376,7 +384,7 @@
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
 
-    if (mermaidNodes.length) {
+    if (mermaidNodes.length && mermaid) {
       mermaid.run({ nodes: mermaidNodes }).catch(() => {});
     }
 

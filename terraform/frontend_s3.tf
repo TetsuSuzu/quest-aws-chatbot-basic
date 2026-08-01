@@ -49,4 +49,7 @@ resource "aws_s3_object" "frontend_index" {
   content      = replace(file("${path.module}/../frontend/index.html"), "__API_ENDPOINT__", aws_apigatewayv2_stage.main.invoke_url)
   content_type = "text/html; charset=utf-8"
   etag         = md5(replace(file("${path.module}/../frontend/index.html"), "__API_ENDPOINT__", aws_apigatewayv2_stage.main.invoke_url))
+  # HTML1枚構成でデプロイのたびに内容が変わりうるため、ブラウザキャッシュによる
+  # 「更新したのに古い画面が表示される」を防ぐ
+  cache_control = "no-cache, must-revalidate"
 }
