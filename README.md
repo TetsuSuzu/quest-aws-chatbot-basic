@@ -12,7 +12,7 @@
 1. S3バケットを作成し、社内資料（PDF・Word・テキスト）をアップロードする
 2. Bedrockコンソールで「ナレッジベース」を新規作成し、データソースにS3バケットを指定する
 3. 埋め込みモデル（Titan Embeddings）とベクトルストア（Amazon S3 Vectors）を選択し、同期を実行する
-4. Bedrockの「テストチャット」画面でナレッジベースを選び、資料に関する質問を入力して回答を確認する
+4. Webフロントエンド（下記「Webフロントで動作確認する」参照）から質問を入力し、回答を確認する
 
 画面遷移レベルの詳細手順は下記「手順（コンソール操作）」を参照。
 
@@ -20,14 +20,9 @@
 
 ```mermaid
 flowchart TB
-    subgraph Client["利用者"]
-        Participant["参加者\n(構築・動作確認)"]
-        WebUser["ブラウザ利用者\n(オプション)"]
-    end
+    WebUser["ブラウザ利用者"]
 
-    Console["Bedrockコンソール\nKnowledge Base テスト画面"]
-
-    subgraph OptionalWeb["オプション: 簡易Webフロント"]
+    subgraph WebFront["Webフロント"]
         S3Front["S3静的website hosting\n(frontend/index.html)"]
         APIGW["API Gateway (HTTP API)"]
         Lambda["Lambda: ask"]
@@ -41,8 +36,7 @@ flowchart TB
     S3Docs[("Amazon S3\nドキュメント格納")]
     S3V[("S3 Vectors\nベクトルバケット・インデックス")]
 
-    Participant --> Console --> KB
-    WebUser -.-> S3Front -.-> APIGW -.-> Lambda -.-> KB
+    WebUser --> S3Front --> APIGW --> Lambda --> KB
     S3Docs -- "同期(Sync)" --> KB
     KB --> S3V
     KB --> Model
@@ -118,16 +112,16 @@ flowchart TB
 2. 「データソース」欄で対象のデータソースにチェックを入れ、**「同期」**ボタンをクリック
 3. ステータスが「同期中」→「使用可能」（Available/Ready）になるまで待つ（ドキュメント数が少なければ数十秒程度）
 
-### 6. テスト画面で動作確認する
+### 6. 動作確認する
 
-1. Knowledge Base詳細画面の右側（または上部）にある**「ナレッジベースをテスト」**パネルを開く
-2. 生成に使うモデル（Claude等）を選択する
-3. 質問（例: 「在宅勤務は週に何日まで使えますか？」）を入力し、送信する
-4. アップロードしたドキュメントの内容に基づいて回答が返ること、回答と一緒に**出典（ソースの詳細）**も表示されることを確認する
+Bedrockコンソールのテスト画面は使わず、Webフロントエンド（下記「Webフロントで動作確認する」参照、`terraform apply`で自動デプロイされる）またはcurlでのAPI直接呼び出しで動作確認する。
+
+1. Webフロントエンド（`frontend_url`出力のURL）を開くか、`curl -X POST https://<api_endpoint>/ask -d '{"question": "在宅勤務は週に何日まで使えますか？"}'`を実行する
+2. アップロードしたドキュメントの内容に基づいて回答が返ること、回答と一緒に**出典（ソースのURI）**も返ることを確認する
 
 ## 問い合わせ例
 
-Knowledge Baseのテスト画面や、後述のWebフロント・curlから試せる質問例。現在取り込んでいる文書（`sample-docs/`）の内容に基づく。
+後述のWebフロント・curlから試せる質問例。現在取り込んでいる文書（`sample-docs/`）の内容に基づく。
 
 **社内業務（経費精算・在宅勤務）**
 - 経費精算はどのように申請すればいいですか？
@@ -208,9 +202,9 @@ Knowledge Baseのテスト画面や、後述のWebフロント・curlから試�
 | セキュリティ／権限 | 誰がアクセスできるかの制御 |
 | 解決の方向性 | 自動連携（Box→S3等）の実現には、Box管理者との連携調整が別途発生する |
 
-## オプション: S3でシンプルなWebフロントを追加する
+## Webフロントで動作確認する
 
-Bedrockコンソールのテストチャットだけでなく、ブラウザからも質問できるようにしたい場合は、**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントを追加できる（`terraform/`に検証済みで含まれている、構成図は上記「推奨アーキテクチャ」の点線部分）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
+Bedrockコンソールのテスト画面は使わず、ブラウザから質問できる**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントで動作確認する（`terraform/`で自動デプロイされる、構成図は上記「推奨アーキテクチャ」を参照）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
 
 - `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
