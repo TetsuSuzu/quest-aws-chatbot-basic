@@ -315,6 +315,7 @@
   const form = document.getElementById("form");
   const input = document.getElementById("question");
   const button = form.querySelector("button");
+  let sessionId = null;
 
   function icon(role) {
     if (role === "user") return "🧑";
@@ -368,10 +369,11 @@
       const res = await fetch(API_ENDPOINT + "/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, sessionId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      sessionId = data.sessionId || sessionId;
       typing.remove();
       addBubble("bot", data.answer, data.sources);
     } catch (err) {
