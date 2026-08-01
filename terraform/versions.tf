@@ -13,8 +13,12 @@ terraform {
     }
   }
 
-  # 検証用ミニ構成のため、tfstateはローカル管理でよい
-  # (本番運用するならquest-aws-chatbot本体と同様にS3バックエンド化すること)
+  # tfstateはS3で管理する（bucket/regionはterraform initの-backend-configで渡す。
+  # terraform/bootstrap/で作成したバケットを使う）
+  backend "s3" {
+    key          = "quest-aws-chatbot-basic/terraform.tfstate"
+    use_lockfile = true
+  }
 }
 
 provider "aws" {

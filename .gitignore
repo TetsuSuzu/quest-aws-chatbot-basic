@@ -3,3 +3,6 @@ terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfplan
 terraform/build/
+terraform/bootstrap/.terraform/
+terraform/bootstrap/*.tfstate
+terraform/bootstrap/*.tfstate.*
