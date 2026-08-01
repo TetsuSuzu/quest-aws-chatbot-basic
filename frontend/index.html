@@ -140,32 +140,6 @@
     padding: 12px 0 2px;
   }
 
-  .suggestions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px 16px;
-    border-top: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .chip {
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--ink);
-    border-radius: 999px;
-    padding: 7px 13px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
-  }
-
-  .chip:hover {
-    background: rgba(109, 141, 255, 0.15);
-    border-color: rgba(109, 141, 255, 0.4);
-    transform: translateY(-1px);
-  }
-
   .row {
     display: flex;
     align-items: flex-end;
@@ -327,11 +301,6 @@
       <div id="log">
         <p class="greeting">こんにちは。社内規定について、何でもお気軽にどうぞ。</p>
       </div>
-      <div class="suggestions">
-        <button class="chip" type="button" data-q="経費精算はどのように申請しますか？">経費精算はどのように申請しますか？</button>
-        <button class="chip" type="button" data-q="在宅勤務は週に何日まで使えますか？">在宅勤務は週に何日まで使えますか？</button>
-        <button class="chip" type="button" data-q="経費精算の申請期限はいつまでですか？">経費精算の申請期限はいつまでですか？</button>
-      </div>
       <form id="form">
         <input id="question" placeholder="質問を入力..." autocomplete="off">
         <button type="submit" aria-label="送信">➤</button>
@@ -419,9 +388,6 @@
     ask(input.value.trim());
   });
 
-  document.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => ask(chip.dataset.q));
-  });
 </script>
 </body>
 </html>
