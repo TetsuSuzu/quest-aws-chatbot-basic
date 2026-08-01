@@ -209,15 +209,141 @@ Bedrockコンソールのテスト画面は使わず、ブラウザから質問�
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
 - フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
 
-**`lambda_function.py`の処理内容**
+## `lambda_function.py`の解説
 
-| 要素 | 役割 |
-|---|---|
-| `PROMPT_TEMPLATE` | `RetrieveAndGenerate`のデフォルト生成プロンプトを差し替えるカスタムテンプレート。手続き系の質問にMermaidフローチャートを追加する指示を含む（詳細は下記「Mermaidフローチャート自動生成」参照）。`$search_results$`（検索結果）・`$output_format_instructions$`（出典表示に必須）の2つのプレースホルダーは必ず残す |
-| `_retrieve_and_generate(question, session_id)` | Bedrock KBの`retrieve_and_generate`を呼び出す本体。`session_id`が渡されていれば`sessionId`として引き継ぎ、会話の文脈を継続する |
-| `ask_knowledge_base(question, session_id)` | `_retrieve_and_generate`を呼び、`ClientError`が発生し、かつメッセージに"session"が含まれる場合（渡された`sessionId`が期限切れ・無効）は`session_id=None`で再試行して新規セッションにフォールバックする。レスポンスから`citations`をたどって出典のS3 URIを重複排除・ソートして抽出し、`answer`・`sources`・`sessionId`をまとめて返す |
-| `_response(status_code, body)` | API Gateway（Lambdaプロキシ統合）用のレスポンス整形。CORSを許可する`Access-Control-Allow-Origin: *`ヘッダーを付与する |
-| `lambda_handler(event, context)` | エントリポイント。リクエストボディから`question`（必須）と`sessionId`（任意）を取り出し、`question`が空なら400エラー、それ以外は`ask_knowledge_base`を呼んで結果を返す |
+このリポジトリで唯一のLambda関数。コードブロックごとに解説する。
+
+### インポートとクライアント初期化
+
+```python
+import json
+import os
+
+import boto3
+from botocore.exceptions import ClientError
+
+bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
+
+KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
+MODEL_ARN = os.environ["MODEL_ARN"]
+```
+
+- `boto3.client("bedrock-agent-runtime")`はBedrock Knowledge Baseに対して検索・回答生成を行うためのAPIクライアント（KB自体の作成・管理を行う`bedrock-agent`とは別のクライアントである点に注意）
+- `KNOWLEDGE_BASE_ID`・`MODEL_ARN`はLambdaの環境変数から取得する（`terraform/api.tf`でLambdaリソースに設定済み）。ハードコーディングせず環境変数経由にすることで、KBやモデルを差し替えてもコード変更なしで対応できる
+- クライアントの初期化をハンドラー関数の外（モジュールレベル）で行っているのは、Lambdaの実行環境が再利用される際（コールドスタートではない2回目以降の呼び出し）にクライアントを使い回し、初期化コストを省くため
+
+### カスタムプロンプトテンプレート
+
+````python
+# $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
+PROMPT_TEMPLATE = """あなたは社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
+
+手続き・申請フロー・プロセスに関する質問（例:「〜の申請手順は？」「〜の流れを教えて」）の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。
+
+検索結果:
+$search_results$
+
+$output_format_instructions$"""
+````
+
+- Bedrock KBの`RetrieveAndGenerate`はデフォルトの生成プロンプトを持っているが、`generationConfiguration.promptTemplate`で独自のものに差し替えられる
+- `$search_results$`（検索でヒットしたドキュメントのチャンク）と`$output_format_instructions$`（出典＝citationsを出力させるための指示。**これを外すと出典が返らなくなる**）の2つはBedrock側の予約プレースホルダーで、カスタムプロンプトでも必ず残す必要がある
+- Mermaidフローチャートを促す指示文だけが独自に追加した部分（詳細は下記「回答内のMermaidフローチャート自動生成」参照）
+
+### `_retrieve_and_generate` — Bedrock KB呼び出し本体
+
+```python
+def _retrieve_and_generate(question: str, session_id: str | None):
+    kwargs = {}
+    if session_id:
+        kwargs["sessionId"] = session_id
+
+    return bedrock_agent_runtime.retrieve_and_generate(
+        input={"text": question},
+        retrieveAndGenerateConfiguration={
+            "type": "KNOWLEDGE_BASE",
+            "knowledgeBaseConfiguration": {
+                "knowledgeBaseId": KNOWLEDGE_BASE_ID,
+                "modelArn": MODEL_ARN,
+                "generationConfiguration": {
+                    "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
+                },
+            },
+        },
+        **kwargs,
+    )
+```
+
+- `session_id`が渡されていれば`sessionId`引数としてAPI呼び出しに含める。Bedrock側はこの`sessionId`に紐づけて過去の会話履歴を保持しており、渡すことで文脈を踏まえた回答ができる（詳細は下記「会話履歴の保持」参照）
+- `session_id`が`None`（初回の質問）の場合は`kwargs`が空のままなので、`sessionId`を指定せずに呼び出す＝新規セッションとして開始される
+- 呼び出し自体を関数として切り出しているのは、次の`ask_knowledge_base`内で「初回の`session_id`付き呼び出しが失敗したら、`session_id`なしで再試行する」というリトライ処理をシンプルに書くため
+
+### `ask_knowledge_base` — リトライと出典抽出
+
+```python
+def ask_knowledge_base(question: str, session_id: str | None) -> dict:
+    try:
+        response = _retrieve_and_generate(question, session_id)
+    except ClientError as exc:
+        # セッションが期限切れ・無効な場合は新規セッションとしてやり直す
+        if session_id and "session" in str(exc).lower():
+            response = _retrieve_and_generate(question, None)
+        else:
+            raise
+
+    sources = sorted({
+        ref["location"]["s3Location"]["uri"]
+        for citation in response.get("citations", [])
+        for ref in citation.get("retrievedReferences", [])
+        if "s3Location" in ref.get("location", {})
+    })
+    return {
+        "answer": response["output"]["text"],
+        "sources": sources,
+        "sessionId": response["sessionId"],
+    }
+```
+
+- **セッションフォールバック**: フロントエンドが保持している`sessionId`がBedrock側でアイドルタイムアウト等により無効になっている場合、`retrieve_and_generate`は`ClientError`を返す。エラーメッセージに"session"という語が含まれる場合に限り、`session_id=None`で新規セッションとして再試行する（それ以外のエラー、例えば権限エラーやモデルエラーはそのまま`raise`して呼び出し元に伝播させる）
+- **出典の抽出**: レスポンスの`citations`（検索結果の根拠となったチャンクの一覧）を1件ずつたどり、`retrievedReferences`の中から`s3Location`を持つものだけを対象に、`uri`（例: `s3://.../gov/01_standard_travel_agency_terms.pdf`）を集める。`{...}`という集合内包表記で重複を自動的に除去し、`sorted()`で並び順を安定させている
+- 戻り値の`sessionId`は、次のリクエストでフロントエンドが引き継いで送り返すためのもの（新規セッションの場合はBedrockが新しく発行したものが入る）
+
+### `_response` — API Gatewayレスポンスの整形
+
+```python
+def _response(status_code: int, body: dict) -> dict:
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": json.dumps(body, ensure_ascii=False),
+    }
+```
+
+- API Gatewayの**Lambdaプロキシ統合**（`payload_format_version = "2.0"`）が期待する形式（`statusCode`・`headers`・`body`を持つ辞書）にレスポンスを整形するだけの小さなヘルパー
+- `Access-Control-Allow-Origin: *`はCORS対応。S3静的website hostingのオリジンとAPI Gatewayのオリジンが異なる（別ドメイン）ため、これがないとブラウザがレスポンスをブロックする
+- `json.dumps(..., ensure_ascii=False)`により、日本語をUnicodeエスケープ（`\uXXXX`）せずそのままUTF-8で出力する（可読性のため）
+
+### `lambda_handler` — エントリポイント
+
+```python
+def lambda_handler(event, context):
+    body = json.loads(event.get("body") or "{}")
+    question = (body.get("question") or "").strip()
+    if not question:
+        return _response(400, {"error": "question is empty"})
+
+    session_id = body.get("sessionId") or None
+    result = ask_knowledge_base(question, session_id)
+    return _response(200, result)
+```
+
+- API Gatewayから渡される`event`の`body`（JSON文字列）をパースする。`body`が存在しない場合に備え`"{}"`をデフォルト値にしている
+- `question`が空文字列（キー自体がない場合も含む）なら、Bedrockを呼ばずに`400`エラーを即座に返す（不要なAPI呼び出し・課金を避ける）
+- `sessionId`は任意項目（`body.get("sessionId") or None`で、キーがない・空文字列のどちらでも`None`に正規化する）
+- 最終的に`ask_knowledge_base`の結果（`answer`・`sources`・`sessionId`）をそのまま`200`で返す
 
 **API Gatewayの種類（HTTP API vs REST API）**: 本リポジトリはHTTP APIを採用している。
 
