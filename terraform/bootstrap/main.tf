@@ -86,10 +86,16 @@ data "aws_iam_policy_document" "github_actions_trust" {
       values   = ["sts.amazonaws.com"]
     }
 
+    # このGitHubアカウントは過去のリネーム等の影響でsubクレームに
+    # owner_id/repository_idが付与される形式になっているため、両方のパターンを許可する
+    # （実際の値はCloudTrailのAssumeRoleWithWebIdentity失敗イベントで確認した）
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:*"]
+      values = [
+        "repo:${var.github_repository}:*",
+        "repo:TetsuSuzu@144105005/quest-aws-chatbot-basic@1318833778:*",
+      ]
     }
   }
 }
