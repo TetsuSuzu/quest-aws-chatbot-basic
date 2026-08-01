@@ -3,71 +3,402 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>社内ナレッジAIチャットボット（Basic）</title>
+<title>社内ナレッジAIチャットボット</title>
 <style>
+  :root {
+    --bg-top: #0f1720;
+    --bg-bottom: #1b2735;
+    --surface: rgba(255, 255, 255, 0.06);
+    --surface-solid: #1b2530;
+    --border: rgba(255, 255, 255, 0.09);
+    --ink: #e8edf2;
+    --muted: #8a97a6;
+    --accent-a: #6d8dff;
+    --accent-b: #7ee0d6;
+    --user-bubble: linear-gradient(135deg, #6d8dff, #7c6dff);
+    --error: #ff8080;
+  }
+
   * { box-sizing: border-box; }
+
   body {
     margin: 0;
+    min-height: 100vh;
     font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", system-ui, sans-serif;
-    background: #f3f6f8;
-    color: #22303a;
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 500px at 15% -10%, rgba(109, 141, 255, 0.25), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(126, 224, 214, 0.15), transparent 55%),
+      linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+    background-attachment: fixed;
   }
-  .page { max-width: 640px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
-  header { padding: 24px 16px 12px; }
-  header h1 { margin: 0; font-size: 20px; }
-  header p { margin: 4px 0 0; font-size: 13px; color: #5a6b74; }
-  main { flex: 1; padding: 0 16px 16px; display: flex; flex-direction: column; }
-  #log { flex: 1; background: #fff; border-radius: 12px; padding: 16px; overflow-y: auto; min-height: 320px; max-height: 60vh; box-shadow: 0 4px 16px rgba(20,40,50,0.08); }
-  .row { margin-bottom: 12px; display: flex; }
-  .row.user { justify-content: flex-end; }
-  .bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-  .row.user .bubble { background: #2f6fed; color: #fff; }
-  .row.bot .bubble { background: #eef2f4; color: #22303a; }
-  .row.error .bubble { background: #fdecea; color: #a12622; }
-  form { display: flex; gap: 8px; margin-top: 12px; }
-  input { flex: 1; border: 1px solid #d5dee2; border-radius: 999px; padding: 10px 16px; font-size: 14px; }
-  button { border: none; border-radius: 999px; padding: 10px 18px; background: #2f6fed; color: #fff; font-size: 14px; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .page {
+    max-width: 720px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 28px 18px 20px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 4px 22px;
+  }
+
+  .logo {
+    width: 46px;
+    height: 46px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+    box-shadow: 0 8px 20px rgba(109, 141, 255, 0.35);
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+
+  header p {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  #toggle {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 10px;
+  }
+
+  .dot-live {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-b);
+    box-shadow: 0 0 8px var(--accent-b);
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  #shell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 460px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+
+  #log {
+    flex: 1;
+    padding: 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+
+  #log::-webkit-scrollbar { width: 8px; }
+  #log::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 8px; }
+
+  .empty {
+    margin: auto 0;
+    text-align: center;
+    color: var(--muted);
+    padding: 0 20px;
+  }
+
+  .empty .icon { font-size: 30px; margin-bottom: 10px; }
+  .empty p { font-size: 13.5px; margin: 0 0 16px; }
+
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .chip {
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+  }
+
+  .chip:hover {
+    background: rgba(109, 141, 255, 0.15);
+    border-color: rgba(109, 141, 255, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    animation: rise 0.25s ease;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .row.user { flex-direction: row-reverse; }
+
+  .avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+  }
+
+  .row.bot .avatar { background: linear-gradient(135deg, var(--accent-a), var(--accent-b)); }
+  .row.error .avatar { background: rgba(255, 128, 128, 0.15); }
+
+  .bubble {
+    max-width: 72%;
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .row.user .bubble {
+    background: var(--user-bubble);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+    box-shadow: 0 8px 20px rgba(109, 141, 255, 0.25);
+  }
+
+  .row.bot .bubble {
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    border-bottom-left-radius: 4px;
+  }
+
+  .row.error .bubble {
+    background: rgba(255, 128, 128, 0.08);
+    border: 1px solid rgba(255, 128, 128, 0.3);
+    color: var(--error);
+    border-bottom-left-radius: 4px;
+  }
+
+  .sources {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .typing .bubble { display: flex; align-items: center; gap: 5px; padding: 14px 16px; }
+  .typing .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+  .typing .dot:nth-child(2) { animation-delay: 0.15s; }
+  .typing .dot:nth-child(3) { animation-delay: 0.3s; }
+
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  form {
+    display: flex;
+    gap: 10px;
+    padding: 14px;
+    border-top: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  input {
+    flex: 1;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 999px;
+    padding: 12px 18px;
+    font-size: 14px;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  input::placeholder { color: var(--muted); }
+  input:focus { border-color: var(--accent-a); background: rgba(255, 255, 255, 0.07); }
+
+  button {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+    color: #0f1720;
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 8px 20px rgba(109, 141, 255, 0.3);
+    transition: transform 0.12s ease, opacity 0.15s ease;
+  }
+
+  button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+  button:not(:disabled):hover { transform: scale(1.06); }
+  button:not(:disabled):active { transform: scale(0.96); }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    padding: 14px 4px 2px;
+  }
+
+  @media (max-width: 480px) {
+    .page { padding: 18px 10px 14px; }
+    header h1 { font-size: 16px; }
+    .bubble { max-width: 82%; }
+  }
 </style>
 </head>
 <body>
 <div class="page">
   <header>
-    <h1>社内ナレッジAIチャットボット（Basic）</h1>
-    <p>経費精算・在宅勤務など、社内規定に関する質問にお答えします</p>
+    <div class="logo">🧠</div>
+    <div>
+      <h1>社内ナレッジAIチャットボット</h1>
+      <p>経費精算・在宅勤務など、社内規定に関する質問にお答えします</p>
+    </div>
+    <div id="toggle"><span class="dot-live"></span>Knowledge Base 接続中</div>
   </header>
+
   <main>
-    <div id="log"></div>
-    <form id="form">
-      <input id="question" placeholder="質問を入力..." autocomplete="off">
-      <button type="submit">送信</button>
-    </form>
+    <div id="shell">
+      <div id="log">
+        <div class="empty" id="empty">
+          <div class="icon">💬</div>
+          <p>こんにちは。社内規定について、何でもお気軽にどうぞ。</p>
+          <div class="suggestions">
+            <button class="chip" type="button" data-q="経費精算はどのように申請しますか？">経費精算はどのように申請しますか？</button>
+            <button class="chip" type="button" data-q="在宅勤務は週に何日まで使えますか？">在宅勤務は週に何日まで使えますか？</button>
+            <button class="chip" type="button" data-q="経費精算の申請期限はいつまでですか？">経費精算の申請期限はいつまでですか？</button>
+          </div>
+        </div>
+      </div>
+      <form id="form">
+        <input id="question" placeholder="質問を入力..." autocomplete="off">
+        <button type="submit" aria-label="送信">➤</button>
+      </form>
+    </div>
+    <footer>Amazon Bedrock Knowledge Base（S3 Vectors）搭載</footer>
   </main>
 </div>
 <script>
   const API_ENDPOINT = "__API_ENDPOINT__";
   const log = document.getElementById("log");
+  const empty = document.getElementById("empty");
   const form = document.getElementById("form");
   const input = document.getElementById("question");
+  const button = form.querySelector("button");
 
-  function addBubble(role, text) {
+  function icon(role) {
+    if (role === "user") return "🧑";
+    if (role === "error") return "⚠️";
+    return "🤖";
+  }
+
+  function addBubble(role, text, sources) {
+    if (empty) empty.remove();
+
     const row = document.createElement("div");
     row.className = "row " + role;
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = icon(role);
+
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.textContent = text;
+
+    if (sources && sources.length) {
+      const src = document.createElement("div");
+      src.className = "sources";
+      src.textContent = "📄 出典: " + sources.join(" / ");
+      bubble.appendChild(src);
+    }
+
+    row.appendChild(avatar);
     row.appendChild(bubble);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
+    return row;
   }
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const question = input.value.trim();
-    if (!question) return;
+  function addTyping() {
+    const row = document.createElement("div");
+    row.className = "row bot typing";
+    row.innerHTML = '<div class="avatar">🤖</div><div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+    return row;
+  }
+
+  async function ask(question) {
+    if (!question || button.disabled) return;
     addBubble("user", question);
     input.value = "";
-    form.querySelector("button").disabled = true;
+    button.disabled = true;
+    const typing = addTyping();
 
     try {
       const res = await fetch(API_ENDPOINT + "/ask", {
@@ -77,16 +408,24 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-      let text = data.answer;
-      if (data.sources && data.sources.length) {
-        text += "\n\n出典:\n" + data.sources.map((s) => "・" + s).join("\n");
-      }
-      addBubble("bot", text);
+      typing.remove();
+      addBubble("bot", data.answer, data.sources);
     } catch (err) {
+      typing.remove();
       addBubble("error", "エラー: " + err.message);
     } finally {
-      form.querySelector("button").disabled = false;
+      button.disabled = false;
+      input.focus();
     }
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    ask(input.value.trim());
+  });
+
+  document.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => ask(chip.dataset.q));
   });
 </script>
 </body>
