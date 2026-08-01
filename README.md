@@ -216,6 +216,16 @@ Bedrockコンソールのテストチャットだけでなく、ブラウザか�
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
 - フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
 
+**`lambda_function.py`の処理内容**
+
+| 要素 | 役割 |
+|---|---|
+| `PROMPT_TEMPLATE` | `RetrieveAndGenerate`のデフォルト生成プロンプトを差し替えるカスタムテンプレート。手続き系の質問にMermaidフローチャートを追加する指示を含む（詳細は下記「Mermaidフローチャート自動生成」参照）。`$search_results$`（検索結果）・`$output_format_instructions$`（出典表示に必須）の2つのプレースホルダーは必ず残す |
+| `_retrieve_and_generate(question, session_id)` | Bedrock KBの`retrieve_and_generate`を呼び出す本体。`session_id`が渡されていれば`sessionId`として引き継ぎ、会話の文脈を継続する |
+| `ask_knowledge_base(question, session_id)` | `_retrieve_and_generate`を呼び、`ClientError`が発生し、かつメッセージに"session"が含まれる場合（渡された`sessionId`が期限切れ・無効）は`session_id=None`で再試行して新規セッションにフォールバックする。レスポンスから`citations`をたどって出典のS3 URIを重複排除・ソートして抽出し、`answer`・`sources`・`sessionId`をまとめて返す |
+| `_response(status_code, body)` | API Gateway（Lambdaプロキシ統合）用のレスポンス整形。CORSを許可する`Access-Control-Allow-Origin: *`ヘッダーを付与する |
+| `lambda_handler(event, context)` | エントリポイント。リクエストボディから`question`（必須）と`sessionId`（任意）を取り出し、`question`が空なら400エラー、それ以外は`ask_knowledge_base`を呼んで結果を返す |
+
 **API Gatewayの種類（HTTP API vs REST API）**: 本リポジトリはHTTP APIを採用している。
 
 | 観点 | HTTP API | REST API |
