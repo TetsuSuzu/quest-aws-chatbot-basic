@@ -176,9 +176,14 @@
     border-radius: 16px;
     font-size: 17px;
     line-height: 1.7;
-    white-space: pre-wrap;
     word-break: break-word;
   }
+
+  .bubble p { margin: 0 0 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble ul, .bubble ol { margin: 4px 0 8px; padding-left: 22px; }
+  .bubble li { margin-bottom: 4px; }
+  .bubble strong { font-weight: 700; }
 
   .row.user .bubble {
     background: var(--user-bubble);
@@ -344,6 +349,47 @@
     return "🤖";
   }
 
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function inlineFormat(s) {
+    return s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  }
+
+  // **太字**・番号付き/箇条書きリストだけに対応した簡易Markdownレンダラー。
+  // 外部ライブラリを使わず、先にHTMLエスケープしてから自前タグのみ挿入するため安全。
+  function renderMarkdownLite(text) {
+    let html = "";
+    let listType = null;
+    const closeList = () => {
+      if (listType) {
+        html += `</${listType}>`;
+        listType = null;
+      }
+    };
+
+    for (const rawLine of escapeHtml(text).split("\n")) {
+      const line = rawLine.trim();
+      const ol = line.match(/^\d+\.\s+(.*)/);
+      const ul = line.match(/^[-・]\s+(.*)/);
+      if (ol) {
+        if (listType !== "ol") { closeList(); html += "<ol>"; listType = "ol"; }
+        html += `<li>${inlineFormat(ol[1])}</li>`;
+      } else if (ul) {
+        if (listType !== "ul") { closeList(); html += "<ul>"; listType = "ul"; }
+        html += `<li>${inlineFormat(ul[1])}</li>`;
+      } else if (line === "") {
+        closeList();
+      } else {
+        closeList();
+        html += `<p>${inlineFormat(line)}</p>`;
+      }
+    }
+    closeList();
+    return html;
+  }
+
   function addBubble(role, text, sources) {
     const row = document.createElement("div");
     row.className = "row " + role;
@@ -367,7 +413,7 @@
         mermaidNodes.push(diagram);
       } else if (segment.trim()) {
         const textBlock = document.createElement("div");
-        textBlock.textContent = segment.trim();
+        textBlock.innerHTML = renderMarkdownLite(segment.trim());
         bubble.appendChild(textBlock);
       }
     });
