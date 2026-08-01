@@ -178,6 +178,23 @@ Bedrockコンソールのテストチャットだけでなく、ブラウザか�
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
 - フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
 
+**API Gatewayの種類（HTTP API vs REST API）**: 本リポジトリはHTTP APIを採用している。
+
+| 観点 | HTTP API | REST API |
+|---|---|---|
+| リクエスト単価 | 安い（東京リージョンで約$1.00/100万リクエスト） | 高い（約$3.50/100万リクエスト、HTTP APIの約3.5倍） |
+| レイテンシ | 低い（軽量な実装） | やや高い |
+| CORS設定 | `cors_configuration`ブロック1つで完結（本リポジトリの現状） | OPTIONSメソッド・統合レスポンスを個別に手動設定する必要がある |
+| 認証方式 | JWT authorizer / IAM / Lambda authorizer | Cognitoユーザープール / IAM / Lambda authorizer / リソースポリシー |
+| APIキー・使用量プラン（レート制限等） | 非対応 | 対応（`aws_api_gateway_usage_plan`等） |
+| リクエスト/レスポンス変換（マッピングテンプレート） | 非対応 | 対応（VTLでの変換が可能） |
+| リクエストバリデーション | 非対応（Lambda側で自前実装が必要） | JSON Schemaベースの組み込みバリデーション対応 |
+| キャッシュ | 非対応 | 対応（ステージ単位でキャッシュ設定可能） |
+| エンドポイントタイプ | リージョナルのみ | リージョナル／エッジ最適化（CloudFront経由）／プライベート（VPCエンドポイント） |
+| WAF統合 | 対応 | 対応 |
+
+`POST /ask`のみの単純なチャットAPIで、APIキー・使用量プラン・キャッシュ・プライベートエンドポイントのいずれも要件になければ、HTTP APIの低コスト・低レイテンシの優位性がそのまま活きるため、これらのREST API専用機能が必要になった場合にのみ切り替えを検討する。
+
 ```bash
 curl -X POST https://<api_endpoint>/ask \
   -H "Content-Type: application/json" \
