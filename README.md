@@ -48,8 +48,6 @@ flowchart TB
     KB --> Model
 ```
 
-実線＝必須構成（マネジメントコンソールだけで完結）、点線＝オプションのWebフロント（`terraform/`で検証済み、Amplifyではなく低コストなS3静的website hostingを採用）。
-
 ### 使用するAWSサービス／リソース一覧
 
 | サービス | 役割 | 備考 |
