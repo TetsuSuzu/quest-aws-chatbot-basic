@@ -122,6 +122,25 @@ Bedrockコンソールのテスト画面は使わず、Webフロントエンド�
 
 後述のWebフロント・curlから試せる質問例。現在取り込んでいる文書（`sample-docs/`）の内容に基づく。
 
+### 取り込みドキュメント一覧
+
+Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3へ自動アップロードする）ドキュメント。
+
+| ファイル | 内容 |
+|---|---|
+| `sample-docs/01_expense_policy.md` | 経費精算規定（社内サンプル） |
+| `sample-docs/02_remote_work_policy.md` | 在宅勤務規定（社内サンプル） |
+| `sample-docs/03_screen_spec_booking.pdf` | 旅行予約サイトの画面仕様書サンプル（旅行検索〜予約完了までの5画面。スキャン画像PDFのため`BEDROCK_FOUNDATION_MODEL`パースで読み取る） |
+| `sample-docs/gov/*.pdf`（16件） | 観光庁公開の旅行業法関連規定（標準旅行業約款・OTAガイドライン等）。個別の出典は[sample-docs/gov/README.md](sample-docs/gov/README.md)参照 |
+| `sample-docs/gov/exam/*.pdf`（10件） | 地域限定旅行業務取扱管理者試験の過去問題（平成30年度〜令和4年度、問題・正解）。個別の出典は[sample-docs/gov/exam/README.md](sample-docs/gov/exam/README.md)参照 |
+
+以下はKBには取り込まれない（`terraform/s3.tf`が`*.md`/`*.pdf`のみを対象とし、`README.md`は明示的に除外しているため）。
+
+| ファイル | 位置づけ |
+|---|---|
+| `sample-docs/03_screen_spec_booking.xlsx` | 画面仕様書の元データ（スクショ貼付Excel）。参考資料 |
+| `sample-docs/gov/README.md` / `sample-docs/gov/exam/README.md` | 出典管理用のメタ文書 |
+
 **社内業務（経費精算・在宅勤務）**
 - 経費精算はどのように申請すればいいですか？
 - 経費精算の申請期限はいつまでですか？
