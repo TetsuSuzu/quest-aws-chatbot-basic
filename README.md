@@ -229,7 +229,7 @@ Bedrockコンソールのテスト画面は使わず、ブラウザから質問�
 
 ## `lambda_function.py`の解説
 
-このリポジトリで唯一のLambda関数。コードブロックごとに解説する。
+このリポジトリで唯一のLambda関数。コードブロックごとに解説する。`kwargs`・`ARN`・`IAM`のような略語につまずいた場合は[docs/glossary.md](docs/glossary.md)を参照。
 
 ### インポートとクライアント初期化
 
