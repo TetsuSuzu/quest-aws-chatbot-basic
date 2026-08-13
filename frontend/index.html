@@ -140,12 +140,20 @@
     padding: 14px 0 2px;
   }
 
+  .suggestions-bar {
+    margin-bottom: 14px;
+  }
+
+  .suggestions-label {
+    margin: 0 0 8px 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
   .suggestions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    justify-content: center;
-    padding: 10px 12px 4px;
   }
 
   .chip {
@@ -157,6 +165,8 @@
     padding: 9px 14px;
     border-radius: 999px;
     cursor: pointer;
+    white-space: nowrap;
+    flex: 0 0 auto;
     transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
   }
 
@@ -288,7 +298,7 @@
   input::placeholder { color: var(--muted); }
   input:focus { border-color: var(--accent-a); background: rgba(255, 255, 255, 0.07); }
 
-  button {
+  form button {
     width: 54px;
     height: 54px;
     border-radius: 50%;
@@ -306,9 +316,9 @@
     transition: transform 0.12s ease, opacity 0.15s ease;
   }
 
-  button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
-  button:not(:disabled):hover { transform: scale(1.06); }
-  button:not(:disabled):active { transform: scale(0.96); }
+  form button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+  form button:not(:disabled):hover { transform: scale(1.06); }
+  form button:not(:disabled):active { transform: scale(0.96); }
 
   footer {
     text-align: center;
@@ -337,16 +347,19 @@
   </header>
 
   <main>
+    <div id="suggestions" class="suggestions-bar">
+      <p class="suggestions-label">こんな質問を試せます</p>
+      <div class="suggestions">
+        <button type="button" class="chip" data-q="同行者の氏名はどの画面で入力しますか？">同行者の氏名はどの画面で入力しますか？</button>
+        <button type="button" class="chip" data-q="会員登録に必要な入力項目を教えてください">会員登録に必要な入力項目を教えてください</button>
+        <button type="button" class="chip" data-q="クーポンの取得に会員登録は必要ですか？">クーポンの取得に会員登録は必要ですか？</button>
+        <button type="button" class="chip" data-q="有効期限が切れたクーポンを取得しようとするとどうなりますか？">有効期限が切れたクーポンを取得しようとするとどうなりますか？</button>
+        <button type="button" class="chip" data-q="予約を確定すると次にどの画面に遷移しますか？">予約を確定すると次にどの画面に遷移しますか？</button>
+      </div>
+    </div>
     <div id="shell">
       <div id="log">
         <p class="greeting">こんにちは。旅行予約画面の仕様や社内規定について、何でもお気軽にどうぞ。</p>
-        <div id="suggestions" class="suggestions">
-          <button type="button" class="chip" data-q="同行者の氏名はどの画面で入力しますか？">同行者の氏名はどの画面で入力しますか？</button>
-          <button type="button" class="chip" data-q="会員登録に必要な入力項目を教えてください">会員登録に必要な入力項目を教えてください</button>
-          <button type="button" class="chip" data-q="クーポンの取得に会員登録は必要ですか？">クーポンの取得に会員登録は必要ですか？</button>
-          <button type="button" class="chip" data-q="有効期限が切れたクーポンを取得しようとするとどうなりますか？">有効期限が切れたクーポンを取得しようとするとどうなりますか？</button>
-          <button type="button" class="chip" data-q="予約を確定すると次にどの画面に遷移しますか？">予約を確定すると次にどの画面に遷移しますか？</button>
-        </div>
       </div>
       <form id="form">
         <input id="question" placeholder="質問を入力..." autocomplete="off">
