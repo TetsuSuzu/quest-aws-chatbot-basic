@@ -56,6 +56,22 @@ resource "aws_iam_role_policy_attachment" "base_lambda_bedrock" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
 }
 
+# citationの出典ページを画像プレビューとして返すため、Lambdaが
+# ページ画像に署名付きURLを発行できるよう、対象プレフィックスに限定して付与する
+data "aws_iam_policy_document" "base_lambda_page_previews" {
+  statement {
+    sid       = "ReadPagePreviews"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.documents.arn}/_page_previews/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "base_lambda_page_previews" {
+  name   = "${var.project_name}-lambda-page-previews"
+  role   = aws_iam_role.base_lambda.id
+  policy = data.aws_iam_policy_document.base_lambda_page_previews.json
+}
+
 resource "aws_lambda_function" "base" {
   function_name    = "${var.project_name}-ask"
   role             = aws_iam_role.base_lambda.arn

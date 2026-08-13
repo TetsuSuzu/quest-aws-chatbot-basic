@@ -244,9 +244,52 @@
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
-    font-size: 14px;
+  }
+
+  .sources-label {
+    font-size: 13px;
     color: var(--muted);
-    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+
+  .sources-thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .source-thumb {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    width: 104px;
+    text-decoration: none;
+  }
+
+  .source-thumb img {
+    width: 104px;
+    height: 78px;
+    object-fit: cover;
+    object-position: top;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+
+  .source-thumb:hover img { transform: scale(1.05); border-color: var(--accent-a); }
+
+  .source-caption {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .source-text {
+    font-size: 13px;
+    color: var(--muted);
   }
 
   .row.bot:has(.mermaid) .bubble { max-width: 92%; }
@@ -466,7 +509,52 @@
     if (sources && sources.length) {
       const src = document.createElement("div");
       src.className = "sources";
-      src.textContent = "📄 出典: " + sources.join(" / ");
+
+      const label = document.createElement("div");
+      label.className = "sources-label";
+      label.textContent = "📄 出典";
+      src.appendChild(label);
+
+      const thumbs = document.createElement("div");
+      thumbs.className = "sources-thumbs";
+      sources.forEach((s) => {
+        const name = s.uri.split("/").pop();
+        const caption = name + (s.page ? `（p.${s.page}）` : "");
+
+        if (s.previewUrl) {
+          const a = document.createElement("a");
+          a.className = "source-thumb";
+          a.href = s.previewUrl;
+          a.target = "_blank";
+          a.rel = "noopener";
+
+          const img = document.createElement("img");
+          img.src = s.previewUrl;
+          img.alt = caption;
+          img.loading = "lazy";
+          // プレビュー画像が用意されていない出典の場合はサムネイルごと諦め、テキストのみにフォールバックする
+          img.addEventListener("error", () => {
+            a.replaceWith(Object.assign(document.createElement("span"), {
+              className: "source-text",
+              textContent: caption,
+            }));
+          });
+          a.appendChild(img);
+
+          const cap = document.createElement("span");
+          cap.className = "source-caption";
+          cap.textContent = caption;
+          a.appendChild(cap);
+
+          thumbs.appendChild(a);
+        } else {
+          const span = document.createElement("span");
+          span.className = "source-text";
+          span.textContent = caption;
+          thumbs.appendChild(span);
+        }
+      });
+      src.appendChild(thumbs);
       bubble.appendChild(src);
     }
 

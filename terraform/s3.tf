@@ -45,3 +45,20 @@ resource "aws_s3_object" "sample_docs" {
   etag         = filemd5("${path.module}/../sample-docs/${each.value}")
   content_type = endswith(each.value, ".pdf") ? "application/pdf" : "text/markdown"
 }
+
+locals {
+  # PDFの各ページを事前にPNG化したもの（sample-docs/page_previews/<PDFのファイル名（拡張子なし）>/page-<N>.png）。
+  # Knowledge Baseのcitationメタデータ(x-amz-bedrock-kb-document-page-number)から
+  # 該当ページの画像を特定し、Lambdaが署名付きURLで返すために使う（RAGの検索対象ではない）
+  page_preview_files = fileset("${path.module}/../sample-docs/page_previews", "**/*.png")
+}
+
+resource "aws_s3_object" "page_previews" {
+  for_each = local.page_preview_files
+
+  bucket       = aws_s3_bucket.documents.id
+  key          = "_page_previews/${each.value}"
+  source       = "${path.module}/../sample-docs/page_previews/${each.value}"
+  etag         = filemd5("${path.module}/../sample-docs/page_previews/${each.value}")
+  content_type = "image/png"
+}

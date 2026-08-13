@@ -246,7 +246,7 @@ curl -X POST https://<invoke_url>/ask \
   -d '{"question": "同行者の氏名はどの画面で入力しますか？"}'
 ```
 
-- `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（Bedrock側が発行するセッションID。次のリクエストに含めると会話の文脈を踏まえた回答になる）が返ってくればOK
+- `answer`（回答本文）・`sources`（出典の一覧。`uri`・`page`・`previewUrl`を持つ）・`sessionId`（Bedrock側が発行するセッションID。次のリクエストに含めると会話の文脈を踏まえた回答になる）が返ってくればOK
 - ブラウザの場合は手順8-4最後で開いたURLからチャット画面で質問する
 - エラーが出る場合は「つまづきポイント」（下記）を参照
 

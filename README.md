@@ -278,13 +278,19 @@ import boto3
 from botocore.exceptions import ClientError
 
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
+s3 = boto3.client("s3")
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
 RERANK_MODEL_ARN = os.environ["RERANK_MODEL_ARN"]
+
+# citationのretrievedReferences[].metadataに入っている、出典PDFのページ番号
+PAGE_NUMBER_METADATA_KEY = "x-amz-bedrock-kb-document-page-number"
+PREVIEW_URL_EXPIRES_IN = 3600
 ```
 
 - `boto3.client("bedrock-agent-runtime")`は、Knowledge Baseへの検索・回答生成をまとめて行う`retrieve_and_generate`専用のAPIクライアント（KB自体の作成・管理を行う`bedrock-agent`や、基盤モデルを直接呼び出す`bedrock-runtime`とはいずれも別物）
+- `boto3.client("s3")`は、出典ページのプレビュー画像に署名付きURLを発行するために使う（詳細は下記`_preview_url`参照）
 - 本リポジトリのKnowledge Baseは**customer-managed型（ベクトルストアにAmazon S3 Vectorsを自前で指定するタイプ）**であり、この型では`RetrieveAndGenerate`APIが正式にサポートされている（AWSがベクトルストアの管理まで丸ごと引き受ける「マネージド型」では非対応で`ValidationException`になるが、本構成では該当しない）。そのため検索・リランキング・生成を1回のAPI呼び出しにまとめられる
 - `KNOWLEDGE_BASE_ID`・`MODEL_ARN`・`RERANK_MODEL_ARN`はLambdaの環境変数から取得する（`terraform/api.tf`でLambdaリソースに設定済み）。ハードコーディングせず環境変数経由にすることで、KB・生成モデル・リランクモデルを差し替えてもコード変更なしで対応できる
 - `ClientError`は、後述のセッション切れリトライ処理で使う
@@ -355,6 +361,30 @@ def _retrieve_and_generate(question: str, session_id: str | None):
 - `numberOfResults: 20`でベクトル検索の候補を広めに取り、`rerankingConfiguration`でリランキングモデル（`RERANK_MODEL_ARN`）にかけて`numberOfRerankedResults: 10`件まで絞り込む。似た項目名を持つ複数の行・複数の資料が混在する表形式データ（画面仕様書等）では、ベクトル類似度だけの上位絞り込みだと本命のチャンクが漏れることがあるため、候補を広く取ってからリランキングで精度を上げている
 - `session_id`が渡された場合のみ`kwargs`に`sessionId`を積む。`retrieve_and_generate`は`sessionId`を渡すと同じ会話の続きとして扱い、渡さなければ新規セッションを開始する
 
+### `_preview_url` — 出典ページのプレビュー画像URLを発行する
+
+```python
+def _preview_url(uri: str, page_number: float) -> str | None:
+    # uri: "s3://<bucket>/<key>" -> 事前生成したページ画像は "_page_previews/<key(拡張子抜き)>/page-<N>.png"。
+    # x-amz-bedrock-kb-document-page-numberは0始まりのため+1して1始まりのファイル名に合わせる（実機で確認済み）
+    bucket, _, key = uri.removeprefix("s3://").partition("/")
+    stem = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    preview_key = f"_page_previews/{stem}/page-{int(page_number) + 1}.png"
+    try:
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": preview_key},
+            ExpiresIn=PREVIEW_URL_EXPIRES_IN,
+        )
+    except ClientError:
+        return None
+```
+
+- **なぜページ番号が分かるのか**: citationの`retrievedReferences[].metadata`には`x-amz-bedrock-kb-document-page-number`というキーで出典PDFのページ番号が入っている。これは実際にレスポンスをダンプして確認した値で、**0始まり**（例: 3ページ目の内容でも`2.0`と返る）だったため、`+1`して1始まりのファイル名（`page-1.png`等）に変換している
+- **プレビュー画像の実体**: `terraform/s3.tf`が`sample-docs/page_previews/<PDFのファイル名>/page-<N>.png`をS3の`_page_previews/`プレフィックス配下へ自動アップロードしている（詳細は下記「補足: 出典ページのプレビュー画像について」参照）。RAGの検索対象ではないため、Knowledge Baseのデータソースには含めていない
+- **署名付きURLを使う理由**: `documents`バケットは非公開のため、そのままではブラウザから画像を読み込めない。`generate_presigned_url`でLambdaの実行ロールの権限を使い、一定時間（`PREVIEW_URL_EXPIRES_IN`=3600秒）だけ有効なURLを発行することで、バケット自体は非公開のままフロントエンドに画像を渡せる
+- プレビュー画像が存在しない出典（ページ番号が取れない場合等）は`None`を返し、フロントエンド側でテキストのみの表示にフォールバックする
+
 ### `ask_knowledge_base` — セッション管理と出典抽出
 
 ```python
@@ -368,21 +398,31 @@ def ask_knowledge_base(question: str, session_id: str | None) -> dict:
         else:
             raise
 
-    sources = sorted({
-        ref["location"]["s3Location"]["uri"]
-        for citation in response.get("citations", [])
-        for ref in citation.get("retrievedReferences", [])
-        if "s3Location" in ref.get("location", {})
-    })
+    sources = {}
+    for citation in response.get("citations", []):
+        for ref in citation.get("retrievedReferences", []):
+            location = ref.get("location", {})
+            if "s3Location" not in location:
+                continue
+            uri = location["s3Location"]["uri"]
+            page_number = ref.get("metadata", {}).get(PAGE_NUMBER_METADATA_KEY)
+            entry = sources.setdefault(
+                (uri, page_number),
+                {"uri": uri, "page": None, "previewUrl": None},
+            )
+            if page_number is not None:
+                entry["page"] = int(page_number) + 1
+                entry["previewUrl"] = _preview_url(uri, page_number)
+
     return {
         "answer": response["output"]["text"],
-        "sources": sources,
+        "sources": sorted(sources.values(), key=lambda s: (s["uri"], s["page"] or 0)),
         "sessionId": response["sessionId"],
     }
 ```
 
 - **セッション切れのリトライ**: Bedrockのセッションには保持期限があり、古い`sessionId`を渡すと`ClientError`になることがある。エラーメッセージに`session`という文字列が含まれる場合はセッション切れとみなし、`session_id=None`（新規セッション）で1回だけ自動的に再試行する。それ以外の例外はそのまま呼び出し元に伝播させる
-- **出典の抽出**: `response["citations"]`には、実際に回答の根拠として使われたチャンクだけが入っている（検索でヒットした全件ではない）。各citationの`retrievedReferences`から出典URIを取り出し、集合内包表記で重複を自動的に除去した上で`sorted()`により並び順を安定させている
+- **出典の抽出**: `response["citations"]`には、実際に回答の根拠として使われたチャンクだけが入っている（検索でヒットした全件ではない）。各citationの`retrievedReferences`から出典URIとページ番号を取り出し、`(uri, page_number)`をキーにした辞書で重複を除去しつつ、`sources`はオブジェクトのリスト（`uri`・`page`・`previewUrl`）として返す（以前は出典URIの文字列だけの配列だったが、プレビュー画像機能の追加に伴い構造化した）
 - **`sessionId`について**: `retrieve_and_generate`はBedrock側で会話履歴を保持する`sessionId`を発行する。レスポンスの`sessionId`をそのまま返し、フロントエンドが次のリクエストに含めることで、Bedrock側が保持している会話履歴を踏まえた回答が返るようになる（`frontend/index.html`は受け取った`sessionId`を変数に保持し、次の質問と一緒に送信している）。「それは何日以内ですか？」のような指示語を含む続けての質問にも対応できる
 
 ### `_response` — API Gatewayレスポンスの整形
