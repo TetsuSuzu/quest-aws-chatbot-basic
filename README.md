@@ -125,6 +125,13 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 | `sample-docs/02_screen_spec_coupon.xlsx` | クーポン取得画面の元データ（スクショ貼付Excel）。参考資料 |
 | `sample-docs/03_screen_spec_booking.xlsx` | 画面仕様書の元データ（スクショ貼付Excel）。参考資料 |
 
+xlsxをS3・KBの対象から意図的に除外しているのは、単に「対象拡張子を絞っているから」だけでなく、以下の理由による。
+
+1. **そもそも画像が読めない**: Excelのセルに貼り付けたスクリーンショットは、PDFのように「ページ」として画像化される仕組みがないため、xlsxを直接アップロードしてもどのパース戦略（標準パーサー・`BEDROCK_FOUNDATION_MODEL`のいずれも）でも画像内の文字は読み取れない。セルの文字値だけが抽出され、画像の中身は失われる
+2. **仮に取り込めても劣化した重複データが増えるだけ**: xlsxとPDFの両方を取り込むと、同じ画面の情報が「文字が読めていない不完全な版（xlsx）」と「正しくOCRされた版（PDF）」の2つでKBに入ることになり、検索結果にノイズが増えるだけでメリットがない
+
+そのため、xlsxは参考資料としてリポジトリに同梱するだけにとどめ、PDFエクスポート後のものだけをKBの取り込み対象にしている。
+
 **会員登録画面（`sample-docs/01_screen_spec_member.pdf`）**
 - 会員登録に必要な入力項目を教えてください
 - パスワードの入力ルールを教えてください
@@ -210,6 +217,16 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 |---|---|
 | `sample-docs/01_screen_spec_member.xlsx` / `02_screen_spec_coupon.xlsx` / `03_screen_spec_booking.xlsx` | 元データ（実際にスクリーンショット画像をセルへ貼り付けたExcel）。参考資料として同梱、KBには取り込まない |
 | `sample-docs/01_screen_spec_member.pdf` / `02_screen_spec_coupon.pdf` / `03_screen_spec_booking.pdf` | 上記をPDFエクスポートしたもの。KBの取り込み対象（`terraform/s3.tf`が`*.md`/`*.pdf`のみをS3へ自動アップロードするため、xlsxのままでは対象外） |
+
+### 補足: サンプルのxlsx/pdf（会員登録・クーポン）はどう作成したか
+
+`01_screen_spec_member.xlsx/pdf`・`02_screen_spec_coupon.xlsx/pdf`は、実在するアプリのスクリーンショットではなく、ハンズオン用に一からモックアップした画面をスクリプトで生成したサンプル。作成の流れは以下の通り。
+
+1. 画面のレイアウトをHTML/CSSでモックアップし、ヘッドレスChrome（`chrome --headless --screenshot`）でスクリーンショット（PNG）を取得する
+2. そのPNGをセルに貼り付けたxlsxを、Pythonの`openpyxl`ライブラリでシート単位（画面単位）に生成する
+3. 同じPNGを使い、1画面1ページのPDF（タイトル＋画像）をPythonの`Pillow`（PIL）ライブラリで直接生成する
+
+**注意（xlsx→pdfの「自動変換」ではない）**: 手順3は「手順2で作ったxlsxをExcelで開いてPDFエクスポートする」という変換処理ではなく、同じ元画像（PNG）からxlsxとPDFをそれぞれ独立にスクリプト生成している。つまり本リポジトリにxlsx→pdfを自動変換する仕組みがあるわけではない。実際の業務でExcelにスクリーンショットを貼り付けたドキュメントを扱う場合は、この方法は使えないため、上記「対処法」で説明した通り、Excelの「エクスポート」機能を使って人手でPDF化する必要がある（`03_screen_spec_booking`はその想定に沿った既存サンプル）。
 
 ### 補足: 埋め込みモデルと次元数の対応
 
