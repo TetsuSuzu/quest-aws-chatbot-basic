@@ -20,7 +20,7 @@ def _retrieve(question: str) -> list[dict]:
         knowledgeBaseId=KNOWLEDGE_BASE_ID,
         retrievalQuery={"text": question},
         retrievalConfiguration={
-            "vectorSearchConfiguration": {"numberOfResults": 6},
+            "managedSearchConfiguration": {"numberOfResults": 6},
         },
     )
     return response.get("retrievalResults", [])

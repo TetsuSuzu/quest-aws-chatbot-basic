@@ -304,13 +304,14 @@ def _retrieve(question: str) -> list[dict]:
         knowledgeBaseId=KNOWLEDGE_BASE_ID,
         retrievalQuery={"text": question},
         retrievalConfiguration={
-            "vectorSearchConfiguration": {"numberOfResults": 6},
+            "managedSearchConfiguration": {"numberOfResults": 6},
         },
     )
     return response.get("retrievalResults", [])
 ```
 
-- `retrieve`はKnowledge Baseに対してベクトル検索のみを行うAPI（生成は行わない）。`numberOfResults`で取得するチャンク数の上限を指定する（多すぎるとプロンプトが肥大化してコスト・レイテンシが増え、少なすぎると根拠不足になるためのトレードオフ）
+- `retrieve`はKnowledge Baseに対して検索のみを行うAPI（生成は行わない）。`numberOfResults`で取得するチャンク数の上限を指定する（多すぎるとプロンプトが肥大化してコスト・レイテンシが増え、少なすぎると根拠不足になるためのトレードオフ）
+- `retrievalConfiguration`は`vectorSearchConfiguration`（Customer-managed型。自前のOpenSearch Serverless等を使う場合）と`managedSearchConfiguration`（Managed型。本リポジトリで作成しているのはこちら）の2種類があり、KBの種類に合わない方を指定すると`ValidationException`になる。フィールド名は違うが中身（`numberOfResults`等）はほぼ同じ
 - 戻り値の各要素は`content.text`（チャンク本文）と`location.s3Location.uri`（出典）などを持つ
 
 ### `_build_search_results_text` / `_generate_answer` — プロンプト組み立てと回答生成
