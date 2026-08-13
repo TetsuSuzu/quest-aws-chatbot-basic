@@ -8,6 +8,7 @@ bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
+RERANK_MODEL_ARN = os.environ["RERANK_MODEL_ARN"]
 
 # $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
 PROMPT_TEMPLATE = """あなたはJTB情報管理ツールに関する社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
@@ -34,6 +35,21 @@ def _retrieve_and_generate(question: str, session_id: str | None):
                 "modelArn": MODEL_ARN,
                 "generationConfiguration": {
                     "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
+                },
+                # 似た項目名を持つ複数の行・複数の資料が混在する表形式データでは、
+                # ベクトル類似度だけの上位絞り込みだと本命のチャンクが漏れることがあるため、
+                # 候補は広め(20件)に取ってからリランキングモデルで上位10件に絞り込む
+                "retrievalConfiguration": {
+                    "managedSearchConfiguration": {
+                        "numberOfResults": 20,
+                        "rerankingConfiguration": {
+                            "type": "BEDROCK_RERANKING_MODEL",
+                            "bedrockRerankingConfiguration": {
+                                "modelConfiguration": {"modelArn": RERANK_MODEL_ARN},
+                                "numberOfRerankedResults": 10,
+                            },
+                        },
+                    },
                 },
             },
         },

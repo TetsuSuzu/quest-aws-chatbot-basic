@@ -21,3 +21,9 @@ variable "generation_model_arn" {
   type        = string
   default     = "arn:aws:bedrock:ap-northeast-1:691665347318:inference-profile/jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
+
+variable "rerank_model_arn" {
+  description = "検索結果の並べ替え（reranking）に使うモデルARN。foundation-model ARNのためアカウント非依存（`aws bedrock list-foundation-models --query \"modelSummaries[?contains(modelId,'rerank')]\"`で確認可能）"
+  type        = string
+  default     = "arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.rerank-v1:0"
+}

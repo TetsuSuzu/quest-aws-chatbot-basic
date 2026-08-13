@@ -43,6 +43,14 @@ data "aws_iam_policy_document" "base_lambda_permissions" {
       "arn:aws:bedrock:*::foundation-model/*",
     ]
   }
+
+  # rerankingConfigurationでretrieve/retrieve_and_generateから呼ばれるモデル。
+  # KB自体のロール(kb_permissions)とは別に、呼び出し元(このLambda)のロールにも権限が必要
+  statement {
+    sid       = "InvokeRerankModel"
+    actions   = ["bedrock:InvokeModel"]
+    resources = [var.rerank_model_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "base_lambda" {
@@ -64,6 +72,7 @@ resource "aws_lambda_function" "base" {
     variables = {
       KNOWLEDGE_BASE_ID = aws_bedrockagent_knowledge_base.main.id
       MODEL_ARN         = var.generation_model_arn
+      RERANK_MODEL_ARN  = var.rerank_model_arn
     }
   }
 }
