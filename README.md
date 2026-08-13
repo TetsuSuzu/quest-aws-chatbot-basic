@@ -60,8 +60,6 @@ flowchart TB
 - ❌ S3バケット・S3 Vectorsバケットの公開設定（パブリックアクセス）
 - ❌ 機密度の高い実データ・個人情報のアップロード（デモ用データのみ使用）
 - ❌ IAMの過剰権限（`AdministratorAccess`等）の安易な付与
-- ❌ サンドボックス環境外のリソースへのアクセス
-- ❌ APIキー・認証情報のハードコーディング／外部共有
 
 ## 手順（マネジメントコンソール操作）
 
@@ -115,13 +113,35 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 
 | ファイル | 内容 |
 |---|---|
-| `sample-docs/03_screen_spec_booking.pdf` | 旅行予約サイトの画面仕様書サンプル（旅行検索〜予約完了までの5画面。スキャン画像PDFのため`BEDROCK_FOUNDATION_MODEL`パースで読み取る） |
+| `sample-docs/01_screen_spec_member.pdf` | 会員登録画面の仕様書サンプル（入力・確認・完了・エラーメッセージ一覧の4画面。スキャン画像PDFのため`BEDROCK_FOUNDATION_MODEL`パースで読み取る） |
+| `sample-docs/02_screen_spec_coupon.pdf` | クーポン取得画面の仕様書サンプル（一覧・詳細・取得完了・エラーメッセージ一覧の4画面。同上のパースで読み取る） |
+| `sample-docs/03_screen_spec_booking.pdf` | 旅行予約サイトの画面仕様書サンプル（旅行検索〜予約完了までの5画面。同上のパースで読み取る） |
 
 以下はKBには取り込まれない（`terraform/s3.tf`が`*.md`/`*.pdf`のみを対象としているため）。
 
 | ファイル | 位置づけ |
 |---|---|
+| `sample-docs/01_screen_spec_member.xlsx` | 会員登録画面の元データ（スクショ貼付Excel）。参考資料 |
+| `sample-docs/02_screen_spec_coupon.xlsx` | クーポン取得画面の元データ（スクショ貼付Excel）。参考資料 |
 | `sample-docs/03_screen_spec_booking.xlsx` | 画面仕様書の元データ（スクショ貼付Excel）。参考資料 |
+
+**会員登録画面（`sample-docs/01_screen_spec_member.pdf`）**
+- 会員登録に必要な入力項目を教えてください
+- パスワードの入力ルールを教えてください
+- 生年月日はどの画面で入力しますか？
+- 登録内容確認画面から入力画面に戻ることはできますか？
+- 会員登録が完了すると何が発行されますか？
+- 既に登録済みのメールアドレスで登録しようとするとどうなりますか？
+- パスワードと確認用パスワードが一致しない場合、どのようなメッセージが表示されますか？
+- 利用規約に同意しないと会員登録はできませんか？
+
+**クーポン取得画面（`sample-docs/02_screen_spec_coupon.pdf`）**
+- クーポンはどの画面から取得できますか？
+- クーポンの利用条件はどこで確認できますか？
+- クーポンを取得すると何が発行されますか？
+- 有効期限が切れたクーポンを取得しようとするとどうなりますか？
+- クーポンの取得に会員登録は必要ですか？
+- クーポンの取得回数に上限はありますか？
 
 **画面仕様書（旅行予約サイトの予約入力UIサンプル、`sample-docs/03_screen_spec_booking.pdf`）**
 - 旅行検索画面ではどんな条件で検索できますか？
@@ -184,12 +204,12 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 - 「画面名・入力項目のラベル・選択肢・ボタン名」を具体的に列挙しているのは、`sample-docs/03_screen_spec_booking.pdf`のような画面仕様書で、単なる「テキストを書き起こして」という指示だと画面キャプチャ内の細かい項目（ボタン名や注記等）が省略されやすいため
 - 「画面ID」の保持を指示しているのは、「SCR-003からSCR-002へ戻れますか？」のような画面IDを含む質問にも正しく回答できるようにするため
 
-サンプルとして、旅行予約サイトの予約入力UI（旅行検索〜予約完了までの5画面）の画面仕様書を以下の2つの形式で用意している。
+サンプルとして、旅行予約サイトの画面仕様書を3種類（会員登録・クーポン取得・予約入力UI）、それぞれ以下の2つの形式で用意している。
 
 | ファイル | 位置づけ |
 |---|---|
-| `sample-docs/03_screen_spec_booking.xlsx` | 元データ（実際にスクリーンショット画像をセルへ貼り付けたExcel）。参考資料として同梱、KBには取り込まない |
-| `sample-docs/03_screen_spec_booking.pdf` | 上記をPDFエクスポートしたもの。KBの取り込み対象（`terraform/s3.tf`が`*.md`/`*.pdf`のみをS3へ自動アップロードするため、xlsxのままでは対象外） |
+| `sample-docs/01_screen_spec_member.xlsx` / `02_screen_spec_coupon.xlsx` / `03_screen_spec_booking.xlsx` | 元データ（実際にスクリーンショット画像をセルへ貼り付けたExcel）。参考資料として同梱、KBには取り込まない |
+| `sample-docs/01_screen_spec_member.pdf` / `02_screen_spec_coupon.pdf` / `03_screen_spec_booking.pdf` | 上記をPDFエクスポートしたもの。KBの取り込み対象（`terraform/s3.tf`が`*.md`/`*.pdf`のみをS3へ自動アップロードするため、xlsxのままでは対象外） |
 
 ### 補足: 埋め込みモデルと次元数の対応
 
