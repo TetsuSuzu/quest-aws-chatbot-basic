@@ -42,18 +42,27 @@ aws bedrock-agent start-ingestion-job --knowledge-base-id <knowledge_base_id> --
 ```python
 import boto3
 
-client = boto3.client("bedrock-agent-runtime", region_name="ap-northeast-1")
-resp = client.retrieve_and_generate(
-    input={"text": "在宅勤務は週に何日まで使えますか？"},
-    retrieveAndGenerateConfiguration={
-        "type": "KNOWLEDGE_BASE",
-        "knowledgeBaseConfiguration": {
-            "knowledgeBaseId": "<knowledge_base_id>",
-            "modelArn": "<region>のinference profile ARN（例: jp.anthropic.claude-sonnet-4-5-...）",
-        },
-    },
+agent_runtime = boto3.client("bedrock-agent-runtime", region_name="ap-northeast-1")
+runtime = boto3.client("bedrock-runtime", region_name="ap-northeast-1")
+
+# 本リポジトリのKnowledge Baseはマネージド型のため、retrieve_and_generate は使えない
+# （ValidationException: not supported for managed knowledge bases）。
+# retrieve（検索）と converse（生成）に分けて呼び出す。
+results = agent_runtime.retrieve(
+    knowledgeBaseId="<knowledge_base_id>",
+    retrievalQuery={"text": "在宅勤務は週に何日まで使えますか？"},
+)["retrievalResults"]
+
+search_results_text = "\n\n".join(r["content"]["text"] for r in results)
+
+resp = runtime.converse(
+    modelId="<region>のinference profile ARN（例: jp.anthropic.claude-sonnet-4-5-...）",
+    messages=[{
+        "role": "user",
+        "content": [{"text": f"検索結果:\n{search_results_text}\n\n質問:\n在宅勤務は週に何日まで使えますか？"}],
+    }],
 )
-print(resp["output"]["text"])
+print(resp["output"]["message"]["content"][0]["text"])
 ```
 
 ## 後片付け

@@ -1,66 +1,64 @@
 import json
 import os
+import uuid
 
 import boto3
-from botocore.exceptions import ClientError
 
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
+bedrock_runtime = boto3.client("bedrock-runtime")
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
 
-# $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
-PROMPT_TEMPLATE = """あなたは社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
+SYSTEM_PROMPT = """あなたはJTB情報管理ツールに関する社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
 
-手続き・申請フロー・プロセスに関する質問（例:「〜の申請手順は？」「〜の流れを教えて」）の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。
-
-検索結果:
-$search_results$
-
-$output_format_instructions$"""
+JTB情報管理ツールの手続き・申請フロー・プロセスに関する質問(例:「〜の申請手順は?」「〜の流れを教えて」)の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。"""
 
 
-def _retrieve_and_generate(question: str, session_id: str | None):
-    kwargs = {}
-    if session_id:
-        kwargs["sessionId"] = session_id
-
-    return bedrock_agent_runtime.retrieve_and_generate(
-        input={"text": question},
-        retrieveAndGenerateConfiguration={
-            "type": "KNOWLEDGE_BASE",
-            "knowledgeBaseConfiguration": {
-                "knowledgeBaseId": KNOWLEDGE_BASE_ID,
-                "modelArn": MODEL_ARN,
-                "generationConfiguration": {
-                    "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
-                },
-            },
+def _retrieve(question: str) -> list[dict]:
+    response = bedrock_agent_runtime.retrieve(
+        knowledgeBaseId=KNOWLEDGE_BASE_ID,
+        retrievalQuery={"text": question},
+        retrievalConfiguration={
+            "vectorSearchConfiguration": {"numberOfResults": 6},
         },
-        **kwargs,
     )
+    return response.get("retrievalResults", [])
+
+
+def _build_search_results_text(results: list[dict]) -> str:
+    blocks = []
+    for i, r in enumerate(results, start=1):
+        text = r.get("content", {}).get("text", "")
+        uri = r.get("location", {}).get("s3Location", {}).get("uri", "")
+        blocks.append(f"[検索結果{i}] (出典: {uri})\n{text}")
+    return "\n\n".join(blocks) if blocks else "(該当する検索結果はありませんでした)"
+
+
+def _generate_answer(question: str, search_results_text: str) -> str:
+    user_message = f"検索結果:\n{search_results_text}\n\n質問:\n{question}"
+    response = bedrock_runtime.converse(
+        modelId=MODEL_ARN,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": user_message}]}],
+    )
+    return response["output"]["message"]["content"][0]["text"]
 
 
 def ask_knowledge_base(question: str, session_id: str | None) -> dict:
-    try:
-        response = _retrieve_and_generate(question, session_id)
-    except ClientError as exc:
-        # セッションが期限切れ・無効な場合は新規セッションとしてやり直す
-        if session_id and "session" in str(exc).lower():
-            response = _retrieve_and_generate(question, None)
-        else:
-            raise
+    results = _retrieve(question)
+    search_results_text = _build_search_results_text(results)
+    answer = _generate_answer(question, search_results_text)
 
     sources = sorted({
-        ref["location"]["s3Location"]["uri"]
-        for citation in response.get("citations", [])
-        for ref in citation.get("retrievedReferences", [])
-        if "s3Location" in ref.get("location", {})
+        r["location"]["s3Location"]["uri"]
+        for r in results
+        if "s3Location" in r.get("location", {})
     })
     return {
-        "answer": response["output"]["text"],
+        "answer": answer,
         "sources": sources,
-        "sessionId": response["sessionId"],
+        "sessionId": session_id or str(uuid.uuid4()),
     }
 
 

@@ -30,14 +30,14 @@ resource "aws_iam_role_policy_attachment" "base_lambda_logs" {
 
 data "aws_iam_policy_document" "base_lambda_permissions" {
   statement {
-    sid       = "RetrieveAndGenerate"
-    actions   = ["bedrock:RetrieveAndGenerate", "bedrock:Retrieve"]
+    sid       = "Retrieve"
+    actions   = ["bedrock:Retrieve"]
     resources = [aws_bedrockagent_knowledge_base.main.arn]
   }
 
   statement {
     sid     = "InvokeGenerationModel"
-    actions = ["bedrock:InvokeModel", "bedrock:GetInferenceProfile"]
+    actions = ["bedrock:InvokeModel", "bedrock:Converse", "bedrock:GetInferenceProfile"]
     resources = [
       var.generation_model_arn,
       "arn:aws:bedrock:*::foundation-model/*",

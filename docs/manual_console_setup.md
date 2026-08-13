@@ -16,19 +16,20 @@ flowchart TB
     S3Docs[("S3\nドキュメント格納")]
     S3V[("S3 Vectors\nベクトルバケット・インデックス")]
 
-    WebUser --> APIGW --> Lambda --> KB
+    WebUser --> APIGW --> Lambda
+    Lambda -- "Retrieve" --> KB
+    Lambda -- "Converse" --> Model
     S3Docs -- "同期(Sync)" --> KB
     KB --> S3V
     KB --> Model
-    Lambda -- "RetrieveAndGenerate" --> KB
 ```
 
 | コンポーネント | 役割 |
 |---|---|
 | S3（ドキュメント用） | 元データ（PDF・Markdown等）の格納先。Knowledge Baseのデータソース |
 | S3 Vectors | Knowledge Baseのベクトルストア（埋め込みベクトルの保存先） |
-| Bedrock Knowledge Base | RAGの中核。検索・回答生成を統合 |
-| Lambda（`<project>-ask`） | API Gatewayから受けたリクエストをKnowledge Baseの`RetrieveAndGenerate`APIに変換して呼び出す薄い関数（[lambda_function.py](../lambda_function.py)） |
+| Bedrock Knowledge Base | RAGの検索部分（`Retrieve`）を担当。本リポジトリのKnowledge Baseはマネージド型のため`RetrieveAndGenerate`は使えず、回答生成はLambdaが基盤モデルを直接呼び出す |
+| Lambda（`<project>-ask`） | API Gatewayから受けたリクエストをKnowledge Baseの`Retrieve`APIで検索し、その結果をもとに`Converse`APIで回答を生成する薄い関数（[lambda_function.py](../lambda_function.py)） |
 | API Gateway（HTTP API） | `POST /ask`エンドポイントを公開し、Lambdaへプロキシ統合する |
 
 以降、`<project>`は任意のプレフィックス（例: `quest-basic`）に読み替える。
@@ -84,7 +85,7 @@ flowchart TB
 
 ## 6. Lambda関数を作成する
 
-Knowledge Baseの`RetrieveAndGenerate`APIを呼び出す薄いLambda関数（[lambda_function.py](../lambda_function.py)）を作成する。
+Knowledge Baseを`Retrieve`APIで検索し、その結果をもとに`Converse`APIで回答を生成する薄いLambda関数（[lambda_function.py](../lambda_function.py)）を作成する。
 
 ### 6-1. 関数の作成
 
@@ -129,15 +130,15 @@ Knowledge Baseの検索・生成（特にMermaidフローチャートを生成�
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "RetrieveAndGenerate",
+      "Sid": "Retrieve",
       "Effect": "Allow",
-      "Action": ["bedrock:RetrieveAndGenerate", "bedrock:Retrieve"],
+      "Action": ["bedrock:Retrieve"],
       "Resource": "<knowledge_base_arn>"
     },
     {
       "Sid": "InvokeGenerationModel",
       "Effect": "Allow",
-      "Action": ["bedrock:InvokeModel", "bedrock:GetInferenceProfile"],
+      "Action": ["bedrock:InvokeModel", "bedrock:Converse", "bedrock:GetInferenceProfile"],
       "Resource": [
         "<model_arn>",
         "arn:aws:bedrock:*::foundation-model/*"
@@ -254,7 +255,7 @@ curl -X POST https://<invoke_url>/ask \
   -d '{"question": "在宅勤務は週に何日まで使えますか？"}'
 ```
 
-- `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（会話継続用）が返ってくればOK
+- `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（識別子。現状は会話の文脈保持には使われない）が返ってくればOK
 - ブラウザの場合は手順8-4最後で開いたURLからチャット画面で質問する
 - エラーが出る場合は「つまづきポイント」（下記）を参照
 

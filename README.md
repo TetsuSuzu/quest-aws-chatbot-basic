@@ -187,10 +187,12 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 - 地域限定旅行業務取扱管理者試験の合格基準は何点ですか？
 - 令和2年度と令和3年度の試験内容にはどのような違いがありますか？
 
-**会話継続（マルチターン、下記「会話履歴の保持」参照）**
+**会話継続（マルチターン）について**
+
+現在の実装（`retrieve` + `converse`）は文脈を保持しないため、以下のような指示語を含む続けての質問には対応できない（既知の制約。詳細は下記「`sessionId`とマルチターン対応について」参照）。
 ```
 1. 経費精算の申請期限はいつまでですか？
-2. （続けて）それは何日以内ですか？
+2. （続けて）それは何日以内ですか？ ← 1.の文脈を踏まえた回答にはならない
 ```
 
 ## つまづきポイントとヒント
@@ -255,7 +257,7 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 Bedrockコンソールのテスト画面は使わず、ブラウザから質問できる**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントで動作確認する（`terraform/`で自動デプロイされる、構成図は上記「推奨アーキテクチャ」を参照）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
 
 - `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面
-- `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge BaseにRetrieveAndGenerateするだけの薄いLambda
+- `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge Baseを`Retrieve`で検索し、その結果をもとに`Converse`で回答を生成する薄いLambda
 - フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
 
 ## `lambda_function.py`の解説
@@ -267,95 +269,98 @@ Bedrockコンソールのテスト画面は使わず、ブラウザから質問�
 ```python
 import json
 import os
+import uuid
 
 import boto3
-from botocore.exceptions import ClientError
 
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
+bedrock_runtime = boto3.client("bedrock-runtime")
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
 ```
 
-- `boto3.client("bedrock-agent-runtime")`はBedrock Knowledge Baseに対して検索・回答生成を行うためのAPIクライアント（KB自体の作成・管理を行う`bedrock-agent`とは別のクライアントである点に注意）
+- `boto3.client("bedrock-agent-runtime")`はKnowledge Baseへの検索（`retrieve`）専用のAPIクライアント。`boto3.client("bedrock-runtime")`は基盤モデルの呼び出し（`converse`）専用のクライアントで、両者は別物である点に注意（KB自体の作成・管理を行う`bedrock-agent`ともさらに別）
+- 当初は`bedrock_agent_runtime.retrieve_and_generate()`のみで検索と生成をまとめて行っていたが、本リポジトリで作成するKnowledge Baseは**マネージド型（ベクトルストアの管理をAWSに一任するタイプ）**であり、`RetrieveAndGenerate`APIはマネージド型では未対応（`ValidationException: This operation is not supported for managed knowledge bases`）。そのため「検索は`retrieve`、生成は`converse`」の2段階に分離している
 - `KNOWLEDGE_BASE_ID`・`MODEL_ARN`はLambdaの環境変数から取得する（`terraform/api.tf`でLambdaリソースに設定済み）。ハードコーディングせず環境変数経由にすることで、KBやモデルを差し替えてもコード変更なしで対応できる
 - クライアントの初期化をハンドラー関数の外（モジュールレベル）で行っているのは、Lambdaの実行環境が再利用される際（コールドスタートではない2回目以降の呼び出し）にクライアントを使い回し、初期化コストを省くため
 
-### カスタムプロンプトテンプレート
-
-````python
-# $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
-PROMPT_TEMPLATE = """あなたは社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
-
-手続き・申請フロー・プロセスに関する質問（例:「〜の申請手順は？」「〜の流れを教えて」）の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。
-
-検索結果:
-$search_results$
-
-$output_format_instructions$"""
-````
-
-- Bedrock KBの`RetrieveAndGenerate`はデフォルトの生成プロンプトを持っているが、`generationConfiguration.promptTemplate`で独自のものに差し替えられる
-- `$search_results$`（検索でヒットしたドキュメントのチャンク）と`$output_format_instructions$`（出典＝citationsを出力させるための指示。**これを外すと出典が返らなくなる**）の2つはBedrock側の予約プレースホルダーで、カスタムプロンプトでも必ず残す必要がある
-- Mermaidフローチャートを促す指示文だけが独自に追加した部分（詳細は下記「回答内のMermaidフローチャート自動生成」参照）
-
-### `_retrieve_and_generate` — Bedrock KB呼び出し本体
+### システムプロンプト
 
 ```python
-def _retrieve_and_generate(question: str, session_id: str | None):
-    kwargs = {}
-    if session_id:
-        kwargs["sessionId"] = session_id
+SYSTEM_PROMPT = """あなたはJTB情報管理ツールに関する社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
 
-    return bedrock_agent_runtime.retrieve_and_generate(
-        input={"text": question},
-        retrieveAndGenerateConfiguration={
-            "type": "KNOWLEDGE_BASE",
-            "knowledgeBaseConfiguration": {
-                "knowledgeBaseId": KNOWLEDGE_BASE_ID,
-                "modelArn": MODEL_ARN,
-                "generationConfiguration": {
-                    "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
-                },
-            },
-        },
-        **kwargs,
-    )
+JTB情報管理ツールの手続き・申請フロー・プロセスに関する質問(例:「〜の申請手順は?」「〜の流れを教えて」)の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。"""
 ```
 
-- `session_id`が渡されていれば`sessionId`引数としてAPI呼び出しに含める。Bedrock側はこの`sessionId`に紐づけて過去の会話履歴を保持しており、渡すことで文脈を踏まえた回答ができる（詳細は下記「会話履歴の保持」参照）
-- `session_id`が`None`（初回の質問）の場合は`kwargs`が空のままなので、`sessionId`を指定せずに呼び出す＝新規セッションとして開始される
-- 呼び出し自体を関数として切り出しているのは、次の`ask_knowledge_base`内で「初回の`session_id`付き呼び出しが失敗したら、`session_id`なしで再試行する」というリトライ処理をシンプルに書くため
+- `RetrieveAndGenerate`を使っていた頃は`$search_results$`・`$output_format_instructions$`というBedrock側の予約プレースホルダーを含んだプロンプトテンプレートを渡す必要があったが、`converse`は単なるチャットAPIなのでその制約はない。検索結果は下記`_generate_answer`内でユーザーメッセージに直接埋め込む
+- Mermaidフローチャートを促す指示文は従来どおり（詳細は下記「回答内のMermaidフローチャート自動生成」参照）
 
-### `ask_knowledge_base` — リトライと出典抽出
+### `_retrieve` — Knowledge Base検索
+
+```python
+def _retrieve(question: str) -> list[dict]:
+    response = bedrock_agent_runtime.retrieve(
+        knowledgeBaseId=KNOWLEDGE_BASE_ID,
+        retrievalQuery={"text": question},
+        retrievalConfiguration={
+            "vectorSearchConfiguration": {"numberOfResults": 6},
+        },
+    )
+    return response.get("retrievalResults", [])
+```
+
+- `retrieve`はKnowledge Baseに対してベクトル検索のみを行うAPI（生成は行わない）。`numberOfResults`で取得するチャンク数の上限を指定する（多すぎるとプロンプトが肥大化してコスト・レイテンシが増え、少なすぎると根拠不足になるためのトレードオフ）
+- 戻り値の各要素は`content.text`（チャンク本文）と`location.s3Location.uri`（出典）などを持つ
+
+### `_build_search_results_text` / `_generate_answer` — プロンプト組み立てと回答生成
+
+```python
+def _build_search_results_text(results: list[dict]) -> str:
+    blocks = []
+    for i, r in enumerate(results, start=1):
+        text = r.get("content", {}).get("text", "")
+        uri = r.get("location", {}).get("s3Location", {}).get("uri", "")
+        blocks.append(f"[検索結果{i}] (出典: {uri})\n{text}")
+    return "\n\n".join(blocks) if blocks else "(該当する検索結果はありませんでした)"
+
+
+def _generate_answer(question: str, search_results_text: str) -> str:
+    user_message = f"検索結果:\n{search_results_text}\n\n質問:\n{question}"
+    response = bedrock_runtime.converse(
+        modelId=MODEL_ARN,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": user_message}]}],
+    )
+    return response["output"]["message"]["content"][0]["text"]
+```
+
+- `_build_search_results_text`は、`RetrieveAndGenerate`がBedrock内部で自動的にやっていた「検索結果をプロンプトに整形する」処理を自前で行う部分。各チャンクに出典URIを添えて番号付きで並べる
+- 検索結果が0件（該当ドキュメントなし）の場合でも空文字列を渡さず、「該当する検索結果はありませんでした」という文言を入れることで、モデルが検索結果欄を無視して幻覚（hallucination）で答えてしまうリスクを減らしている
+- `_generate_answer`は`converse` APIで、`system`にシステムプロンプト、`messages`に検索結果込みのユーザーメッセージを渡して回答を生成する。`converse`はBedrockの複数モデル間で共通化された会話APIで、モデルごとに異なる`invoke_model`のリクエスト形式を意識せずに済む
+
+### `ask_knowledge_base` — 検索・生成・出典抽出の統合
 
 ```python
 def ask_knowledge_base(question: str, session_id: str | None) -> dict:
-    try:
-        response = _retrieve_and_generate(question, session_id)
-    except ClientError as exc:
-        # セッションが期限切れ・無効な場合は新規セッションとしてやり直す
-        if session_id and "session" in str(exc).lower():
-            response = _retrieve_and_generate(question, None)
-        else:
-            raise
+    results = _retrieve(question)
+    search_results_text = _build_search_results_text(results)
+    answer = _generate_answer(question, search_results_text)
 
     sources = sorted({
-        ref["location"]["s3Location"]["uri"]
-        for citation in response.get("citations", [])
-        for ref in citation.get("retrievedReferences", [])
-        if "s3Location" in ref.get("location", {})
+        r["location"]["s3Location"]["uri"]
+        for r in results
+        if "s3Location" in r.get("location", {})
     })
     return {
-        "answer": response["output"]["text"],
+        "answer": answer,
         "sources": sources,
-        "sessionId": response["sessionId"],
+        "sessionId": session_id or str(uuid.uuid4()),
     }
 ```
 
-- **セッションフォールバック**: フロントエンドが保持している`sessionId`がBedrock側でアイドルタイムアウト等により無効になっている場合、`retrieve_and_generate`は`ClientError`を返す。エラーメッセージに"session"という語が含まれる場合に限り、`session_id=None`で新規セッションとして再試行する（それ以外のエラー、例えば権限エラーやモデルエラーはそのまま`raise`して呼び出し元に伝播させる）
-- **出典の抽出**: レスポンスの`citations`（検索結果の根拠となったチャンクの一覧）を1件ずつたどり、`retrievedReferences`の中から`s3Location`を持つものだけを対象に、`uri`（例: `s3://.../gov/01_standard_travel_agency_terms.pdf`）を集める。`{...}`という集合内包表記で重複を自動的に除去し、`sorted()`で並び順を安定させている
-- 戻り値の`sessionId`は、次のリクエストでフロントエンドが引き継いで送り返すためのもの（新規セッションの場合はBedrockが新しく発行したものが入る）
+- **出典の抽出**: `RetrieveAndGenerate`時代は回答の`citations`（実際に回答に使われた根拠のみ）から出典を抽出していたが、`retrieve`+`converse`構成ではモデルの回答と検索結果が別APIの戻り値になるため、正確な対応付けはできない。代わりに`_retrieve`で取得した検索結果全件（＝回答生成のプロンプトに含めたチャンク全て）を出典として返している。`{...}`という集合内包表記で重複を自動的に除去し、`sorted()`で並び順を安定させている
+- **`sessionId`について（重要な制約）**: `retrieve`・`converse`はいずれもステートレスなAPIで、`RetrieveAndGenerate`が持っていたような「Bedrock側で会話履歴を保持する`sessionId`」の仕組みは存在しない。ここで返している`sessionId`はフロントエンドとのインターフェース（レスポンス形状）を変えずに済ませるための識別子にすぎず、**次の質問に渡しても文脈は一切引き継がれない**。「それは何日以内ですか？」のような指示語を含む質問には対応できなくなっている点に注意（マルチターン対応を実装する場合は、フロントから会話履歴を送る、あるいはDynamoDB等で履歴を管理して`converse`の`messages`に積み直す、といった作り込みが別途必要）
 
 ### `_response` — API Gatewayレスポンスの整形
 
@@ -419,33 +424,23 @@ curl -X POST https://<api_endpoint>/ask \
 
 `terraform apply`後の`frontend_url`出力（`http://`を付けてブラウザで開く）から動作確認できる。
 
-**会話履歴の保持（マルチターン対応）**: `RetrieveAndGenerate`API標準の`sessionId`を利用し、DynamoDB等の追加インフラなしで会話の文脈を保持している。1回目の応答に含まれる`sessionId`をフロントエンドがJS変数で保持し、以降のリクエストに含めることで、「それは何日以内ですか？」のような指示語を含む質問にも文脈を踏まえて回答できる（実機で動作確認済み）。渡された`sessionId`が期限切れ・無効な場合はLambda側で自動的に新規セッションにフォールバックする。
+**`sessionId`とマルチターン対応について（既知の制約）**: 以前は`RetrieveAndGenerate`API標準の`sessionId`機能を使い、DynamoDB等の追加インフラなしで会話の文脈を保持していた。しかし本リポジトリのKnowledge Baseは**マネージド型**であり`RetrieveAndGenerate`自体が使えないため、現在の`retrieve`+`converse`構成ではこの機能は失われている。
 
-```bash
-curl -X POST https://<api_endpoint>/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "それは何日以内ですか？", "sessionId": "<1回目の応答で返ってきたsessionId>"}'
-```
+- レスポンスの`sessionId`はフロントとのインターフェースを保つために返しているだけの識別子で、次のリクエストに含めても**文脈は一切引き継がれない**（Lambda側は`question`のみを見て毎回独立に検索・生成している）
+- そのため「それは何日以内ですか？」のような指示語を含む続けての質問には正しく回答できない。試す場合は毎回、指示語を使わず質問を完結させること
 
-DynamoDBで自前管理する場合との比較:
+マルチターン対応が必要になった場合の主な選択肢:
 
-| 観点 | Bedrockの`sessionId`（現状） | DynamoDBで自前管理 |
-|---|---|---|
-| 追加インフラ | 不要 | DynamoDBテーブル・IAM権限（読み書き）が必要 |
-| 実装コスト | 低い（`sessionId`を受け渡すだけ） | 高い（履歴の保存・取得・プロンプトへの組み込みを自前実装） |
-| セッションの持続時間 | Bedrock側のアイドルタイムアウトで自動消滅（正確な時間は非公開、目安1時間程度）、延長不可 | 自分でTTLを設定可能。数日〜無期限も自由に設計できる |
-| 会話ログの参照・監査 | 不可（Bedrock内部で不透明に管理され、後から読み出すAPIがない） | 可能（品質レビュー・利用状況分析・コンプライアンス対応に使える） |
-| デバイス間の継続性 | ブラウザのJS変数任せ。同一ブラウザ・同一タブ内のみ | ログインや共有IDと組み合わせれば端末をまたいで継続可能 |
-| コンテキスト量の制御 | 不可（Bedrockにお任せ） | 自分で「直近n件だけ」「要約して圧縮」等を制御できる |
-| RAG（KB検索）との統合 | ネイティブ統合済み（文脈を踏まえた検索クエリの言い換えも自動） | `RetrieveAndGenerate`のセッション機構は使えなくなるため、`Retrieve` + `Converse`等に作り替えるアーキテクチャ変更が必要 |
-| 運用コスト | ゼロ | わずかに発生（DynamoDBの読み書きリクエスト課金） |
+| 方式 | 実装コスト | 会話ログの監査 | 備考 |
+|---|---|---|---|
+| フロントから直近の会話履歴を送る | 低い（`converse`の`messages`に積むだけ） | 不可 | ブラウザを閉じると履歴は消える。手軽だが規模が増えると素朴には限界がある |
+| DynamoDBで履歴を管理 | 高い（履歴の保存・取得・`messages`への組み込みを自前実装） | 可能 | TTLで保持期間を制御可能。品質レビュー・利用状況分析にも使える |
 
-会話ログの監査・分析やセッションの長期永続化が要件になった場合のみ、DynamoDB化を検討する。今回のような単発利用中心のハンズオン用途では、実装コストゼロで会話継続の体験が十分得られる現状のBedrockネイティブ方式で十分と判断している。
+いずれも今回のスコープでは未実装。必要になった時点で追加検討する。
 
 **回答内のMermaidフローチャート自動生成**: 「経費精算の申請手順を教えてください」のような手続き・フローに関する質問には、テキストの回答に加えてMermaid記法のフローチャートも自動生成される。これは2つの仕組みの組み合わせで実現している。
 
-1. **プロンプトエンジニアリング（`lambda_function.py`）**: `RetrieveAndGenerate`APIのデフォルトの生成プロンプトを、`generationConfiguration.promptTemplate.textPromptTemplate`でカスタムのものに差し替えている。「手続き・申請フロー・プロセスに関する質問の場合は、回答の最後にMermaid記法のフローチャートを ` ```mermaid ``` ` のコードブロックで追加してください」という指示を明示的に加えることで、Claude自身が持つMermaid記法の生成能力（学習データに技術文書由来のMermaid記法が含まれているため、指示すれば正しい構文で書ける）を引き出している。何も指示しなければ、モデルは普通のテキストだけで回答し、図は出力しない。
-   - `$output_format_instructions$`プレースホルダーは出典（citations）を表示させるための必須項目のため、カスタムプロンプトでも必ず含めている。これを外すと出典が返らなくなる。
+1. **プロンプトエンジニアリング（`lambda_function.py`）**: `converse`に渡す`SYSTEM_PROMPT`に、「手続き・申請フロー・プロセスに関する質問の場合は、回答の最後にMermaid記法のフローチャートを ` ```mermaid ``` ` のコードブロックで追加してください」という指示を明示的に加えることで、Claude自身が持つMermaid記法の生成能力（学習データに技術文書由来のMermaid記法が含まれているため、指示すれば正しい構文で書ける）を引き出している。何も指示しなければ、モデルは普通のテキストだけで回答し、図は出力しない。
 2. **フロントエンドでの描画（`frontend/index.html`）**: モデルの回答はあくまで ` ```mermaid ... ``` ` というプレーンテキストとして返ってくるだけなので、ブラウザ側でこのコードブロックを検出し、[mermaid.js](https://mermaid.js.org/)（CDNから動的importで読み込み）を使って実際の図（SVG）に変換・描画している。CDN読み込みに失敗した場合はダイアグラム機能だけを諦め、チャット自体は通常通り動作するようにしている（静的importだとCDN障害時にスクリプト全体が止まってしまうため）。
 
 この2つのうち片方が欠けても実現しない点に注意（プロンプト指示だけではブラウザ上でコードのまま表示され、フロント側の描画処理だけではモデルがそもそも図を生成しない）。
