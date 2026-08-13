@@ -2,10 +2,30 @@
 # 質問できるようにするための最小API（Lambda + API Gateway）。
 # クエスト本体の必須要件ではないが、検証・デモ用に用意している。
 
+# AWS Lambdaのランタイムに同梱されているboto3/botocoreは更新が遅く、
+# managedSearchConfiguration等の新しいBedrock KBパラメータを認識しないことがある
+# （ParamValidationErrorになる）。そのためランタイム同梱版に頼らず、
+# requirements.txtで固定したバージョンをデプロイパッケージに同梱する。
+resource "null_resource" "lambda_dependencies" {
+  triggers = {
+    requirements_hash = filesha256("${path.module}/../requirements.txt")
+  }
+
+  provisioner "local-exec" {
+    command = "python -m pip install --upgrade -r ${path.module}/../requirements.txt -t ${path.module}/build/package"
+  }
+}
+
+resource "local_file" "lambda_source_copy" {
+  content  = file("${path.module}/../lambda_function.py")
+  filename = "${path.module}/build/package/lambda_function.py"
+}
+
 data "archive_file" "base" {
   type        = "zip"
-  source_file = "${path.module}/../lambda_function.py"
+  source_dir  = "${path.module}/build/package"
   output_path = "${path.module}/build/lambda_function.zip"
+  depends_on  = [null_resource.lambda_dependencies, local_file.lambda_source_copy]
 }
 
 data "aws_iam_policy_document" "lambda_trust" {
@@ -28,35 +48,12 @@ resource "aws_iam_role_policy_attachment" "base_lambda_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-data "aws_iam_policy_document" "base_lambda_permissions" {
-  statement {
-    sid       = "Retrieve"
-    actions   = ["bedrock:Retrieve"]
-    resources = [aws_bedrockagent_knowledge_base.main.arn]
-  }
-
-  statement {
-    sid     = "InvokeGenerationModel"
-    actions = ["bedrock:InvokeModel", "bedrock:Converse", "bedrock:GetInferenceProfile"]
-    resources = [
-      var.generation_model_arn,
-      "arn:aws:bedrock:*::foundation-model/*",
-    ]
-  }
-
-  # rerankingConfigurationでretrieve/retrieve_and_generateから呼ばれるモデル。
-  # KB自体のロール(kb_permissions)とは別に、呼び出し元(このLambda)のロールにも権限が必要
-  statement {
-    sid       = "InvokeRerankModel"
-    actions   = ["bedrock:InvokeModel"]
-    resources = [var.rerank_model_arn]
-  }
-}
-
-resource "aws_iam_role_policy" "base_lambda" {
-  name   = "${var.project_name}-lambda-policy"
-  role   = aws_iam_role.base_lambda.id
-  policy = data.aws_iam_policy_document.base_lambda_permissions.json
+# 呼び出すBedrock API(RetrieveAndGenerate/Retrieve/Converse/InvokeModel、
+# リランクモデル等)が変わるたびに個別権限の過不足で詰まっていたため、
+# 細かいアクション単位の管理はやめてマネージドポリシーに一本化する
+resource "aws_iam_role_policy_attachment" "base_lambda_bedrock" {
+  role       = aws_iam_role.base_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
 }
 
 resource "aws_lambda_function" "base" {

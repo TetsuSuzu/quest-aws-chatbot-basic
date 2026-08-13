@@ -2,6 +2,7 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfplan
+terraform/tfplan
 terraform/build/
 terraform/bootstrap/.terraform/
 terraform/bootstrap/*.tfstate

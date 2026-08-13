@@ -36,11 +36,15 @@ def _retrieve_and_generate(question: str, session_id: str | None):
                 "generationConfiguration": {
                     "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
                 },
+                # このKB(S3 Vectors、customer-managed型)ではvectorSearchConfigurationが正しい。
+                # managedSearchConfigurationはAWSが検索設定を丸ごと管理する別タイプのKB専用で、
+                # このKBに使うとValidationExceptionになる。
+                #
                 # 似た項目名を持つ複数の行・複数の資料が混在する表形式データでは、
                 # ベクトル類似度だけの上位絞り込みだと本命のチャンクが漏れることがあるため、
                 # 候補は広め(20件)に取ってからリランキングモデルで上位10件に絞り込む
                 "retrievalConfiguration": {
-                    "managedSearchConfiguration": {
+                    "vectorSearchConfiguration": {
                         "numberOfResults": 20,
                         "rerankingConfiguration": {
                             "type": "BEDROCK_RERANKING_MODEL",

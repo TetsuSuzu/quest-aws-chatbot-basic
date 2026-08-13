@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.4"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
   }
 
   # tfstateはS3で管理する（bucket/regionはterraform initの-backend-configで渡す。
