@@ -243,7 +243,7 @@ Knowledge Baseの検索・生成（特にMermaidフローチャートを生成�
 ```bash
 curl -X POST https://<invoke_url>/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "在宅勤務は週に何日まで使えますか？"}'
+  -d '{"question": "同行者の氏名はどの画面で入力しますか？"}'
 ```
 
 - `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（Bedrock側が発行するセッションID。次のリクエストに含めると会話の文脈を踏まえた回答になる）が返ってくればOK

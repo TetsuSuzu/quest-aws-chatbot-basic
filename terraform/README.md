@@ -43,26 +43,20 @@ aws bedrock-agent start-ingestion-job --knowledge-base-id <knowledge_base_id> --
 import boto3
 
 agent_runtime = boto3.client("bedrock-agent-runtime", region_name="ap-northeast-1")
-runtime = boto3.client("bedrock-runtime", region_name="ap-northeast-1")
 
-# 本リポジトリのKnowledge Baseはマネージド型のため、retrieve_and_generate は使えない
-# （ValidationException: not supported for managed knowledge bases）。
-# retrieve（検索）と converse（生成）に分けて呼び出す。
-results = agent_runtime.retrieve(
-    knowledgeBaseId="<knowledge_base_id>",
-    retrievalQuery={"text": "在宅勤務は週に何日まで使えますか？"},
-)["retrievalResults"]
-
-search_results_text = "\n\n".join(r["content"]["text"] for r in results)
-
-resp = runtime.converse(
-    modelId="<region>のinference profile ARN（例: jp.anthropic.claude-sonnet-4-5-...）",
-    messages=[{
-        "role": "user",
-        "content": [{"text": f"検索結果:\n{search_results_text}\n\n質問:\n在宅勤務は週に何日まで使えますか？"}],
-    }],
+# 本リポジトリのKnowledge Baseはcustomer-managed型（S3 Vectors）のため、
+# retrieve_and_generate で検索・生成を1回の呼び出しにまとめられる。
+resp = agent_runtime.retrieve_and_generate(
+    input={"text": "同行者の氏名はどの画面で入力しますか？"},
+    retrieveAndGenerateConfiguration={
+        "type": "KNOWLEDGE_BASE",
+        "knowledgeBaseConfiguration": {
+            "knowledgeBaseId": "<knowledge_base_id>",
+            "modelArn": "<region>のinference profile ARN（例: jp.anthropic.claude-sonnet-4-5-...）",
+        },
+    },
 )
-print(resp["output"]["message"]["content"][0]["text"])
+print(resp["output"]["text"])
 ```
 
 ## 後片付け
