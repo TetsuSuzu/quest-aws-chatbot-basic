@@ -97,3 +97,23 @@ bedrock_agent_runtime.retrieve_and_generate(
 ```
 
 `sessionId=None`と明示的に渡すのと、`sessionId`引数自体を渡さないのとでは意味が違う（Bedrock側は後者を「新規セッション」の合図として扱う）ため、このような条件付きの組み立てが必要になる。
+
+## 関連コードへのGitHubリンク
+
+上表「このリポジトリのコードに実際に出てくる略語」で挙げた各項目が、実際にどのファイル・どの行にあるかへのリンク。
+
+| 略語 | GitHub上の該当箇所 |
+|---|---|
+| `kwargs` | [lambda_function.py#L24-L27](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/lambda_function.py#L24-L27)（`_retrieve_and_generate`） |
+| `exc` | [lambda_function.py#L67](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/lambda_function.py#L67)（`except ClientError as exc:`） |
+| `ARN` | [lambda_function.py#L9-L11](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/lambda_function.py#L9-L11)、[terraform/variables.tf#L13-L29](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/variables.tf#L13-L29) |
+| `KB` | [lambda_function.py#L9](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/lambda_function.py#L9)（`KNOWLEDGE_BASE_ID`） |
+| `IAM` | [terraform/bedrock_kb.tf#L31](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/bedrock_kb.tf#L31)、[terraform/api.tf#L41](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/api.tf#L41) |
+| `S3` | [terraform/s3.tf#L3](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/s3.tf#L3)（`aws_s3_bucket`） |
+| `JSON` | [lambda_function.py#L1](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/lambda_function.py#L1)（`import json`） |
+| `API` | [terraform/api.tf](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/api.tf)（API Gateway全般） |
+| `CORS` | [terraform/api.tf#L81](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/api.tf#L81)（`cors_configuration`） |
+| `HCL` | [terraform/](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/tree/main/terraform)（`.tf`ファイル全般） |
+| `OIDC` | [.github/workflows/terraform-apply.yml#L12-L13,L36](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/.github/workflows/terraform-apply.yml#L12-L36) |
+| `SSE` | [terraform/s3.tf#L17](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/terraform/s3.tf#L17)（`aws_s3_bucket_server_side_encryption_configuration`） |
+| `VTL` | リポジトリ内に該当コードはなし。[README.md](https://github.com/TetsuSuzu/quest-aws-chatbot-basic/blob/main/README.md)の「HTTP API vs REST API」比較表を参照 |
