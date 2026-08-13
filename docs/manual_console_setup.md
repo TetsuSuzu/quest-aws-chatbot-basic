@@ -12,13 +12,14 @@ flowchart TB
     APIGW["API Gateway (HTTP API)\nPOST /ask"]
     Lambda["Lambda関数\n<project>-ask"]
     KB["Bedrock Knowledge Base"]
+    Rerank["リランクモデル\n(Amazon Rerank)"]
     Model["基盤モデル\n(Claude / Titan Embeddings)"]
     S3Docs[("S3\nドキュメント格納")]
     S3V[("S3 Vectors\nベクトルバケット・インデックス")]
 
     WebUser --> APIGW --> Lambda
-    Lambda -- "Retrieve" --> KB
-    Lambda -- "Converse" --> Model
+    Lambda -- "RetrieveAndGenerate" --> KB
+    KB --> Rerank
     S3Docs -- "同期(Sync)" --> KB
     KB --> S3V
     KB --> Model
@@ -28,8 +29,9 @@ flowchart TB
 |---|---|
 | S3（ドキュメント用） | 元データ（PDF・Markdown等）の格納先。Knowledge Baseのデータソース |
 | S3 Vectors | Knowledge Baseのベクトルストア（埋め込みベクトルの保存先） |
-| Bedrock Knowledge Base | RAGの検索部分（`Retrieve`）を担当。本リポジトリのKnowledge Baseはマネージド型のため`RetrieveAndGenerate`は使えず、回答生成はLambdaが基盤モデルを直接呼び出す |
-| Lambda（`<project>-ask`） | API Gatewayから受けたリクエストをKnowledge Baseの`Retrieve`APIで検索し、その結果をもとに`Converse`APIで回答を生成する薄い関数（[lambda_function.py](../lambda_function.py)） |
+| Bedrock Knowledge Base | RAGの検索・生成をまとめて担当。本リポジトリのKnowledge Baseはcustomer-managed型（S3 Vectors）のため、`RetrieveAndGenerate`を1回呼ぶだけで検索から回答生成まで完結する |
+| リランクモデル（Amazon Rerank） | ベクトル類似度で広めに取った検索候補を、質問との関連度で並べ替えて絞り込む |
+| Lambda（`<project>-ask`） | API Gatewayから受けたリクエストでKnowledge Baseの`RetrieveAndGenerate`APIを呼び出す薄い関数（[lambda_function.py](../lambda_function.py)） |
 | API Gateway（HTTP API） | `POST /ask`エンドポイントを公開し、Lambdaへプロキシ統合する |
 
 以降、`<project>`は任意のプレフィックス（例: `quest-basic`）に読み替える。
@@ -60,7 +62,7 @@ flowchart TB
 1. マネジメントコンソールで**Amazon Bedrock**を開く
 2. 左メニュー下部の**「モデルアクセス」**をクリック
 3. **「モデルアクセスを管理」**をクリック
-4. 埋め込みモデル（**Titan Text Embeddings V2**）と回答生成モデル（**Claude**、選択可能なバージョンでよい）にチェックを入れる
+4. 埋め込みモデル（**Titan Text Embeddings V2**）・回答生成モデル（**Claude**、選択可能なバージョンでよい）・リランクモデル（**Amazon Rerank 1.0**）にチェックを入れる
 5. 「次へ」→利用規約を確認し**「送信」**。ステータスが「アクセス許可済み」になるまで数分待つ
 
 ## 4. Bedrock Knowledge Baseを作成する
@@ -70,7 +72,15 @@ flowchart TB
 3. **IAM権限**: 「新しいサービスロールを作成して使用する」を選択
 4. データソースのタイプで**「S3」**を選択→次へ
 5. データソース名を入力し、**S3 URI**で手順1で作成したバケットを指定
-6. チャンク戦略はデフォルトのままでよい。**パース戦略**は「基盤モデルを使用した解析」（Foundation model parsing）を選び、画像内テキストの読み取りに使うモデル（Claude等）を指定する（スキャン画像PDFやスクショ付き文書を扱う場合に必須。標準パーサーだと画像内の文字が失われる）
+6. チャンク戦略はデフォルトのままでよい。**パース戦略**は「基盤モデルを使用した解析」（Foundation model parsing）を選び、画像内テキストの読み取りに使うモデル（Claude等）を指定する（スキャン画像PDFやスクショ付き文書を扱う場合に必須。標準パーサーだと画像内の文字が失われる）。**カスタム解析指示（parsing prompt）**の欄には以下を入力する（理由は[README.md](../README.md)の「補足: Excel（スクショ貼り付け）の画面仕様書を取り込む場合の注意」参照）
+
+   ```
+   このページは画面仕様書のスクリーンショットを含む日本語の業務文書です。
+   ページに写っているテキストを要約・翻訳・言い換えをせず、原文どおり日本語のまま全て書き起こしてください。
+   画面名・入力項目のラベル・選択肢・ボタン名・注記など、画面上に表示されている文言を漏れなく書き起こしてください。
+   表がある場合は行と列の対応関係が分かる形で書き起こしてください。
+   画面ID(例: SCR-003)など識別子となる番号・記号は省略せず保持してください。
+   ```
 7. **埋め込みモデル**: 「Titan Text Embeddings V2」を選択し、埋め込みの次元数を手順2のベクトルインデックスと**同じ値**に設定する
 8. **ベクトルストア**: 「既存のベクトルストアを使用する」→ストアの種類で**「Amazon S3 Vectors」**を選択し、手順2で作成したベクトルバケット・ベクトルインデックスを指定する
 9. 「次へ」で設定内容を確認し、**「ナレッジベースを作成」**をクリック
@@ -85,7 +95,7 @@ flowchart TB
 
 ## 6. Lambda関数を作成する
 
-Knowledge Baseを`Retrieve`APIで検索し、その結果をもとに`Converse`APIで回答を生成する薄いLambda関数（[lambda_function.py](../lambda_function.py)）を作成する。
+Knowledge Baseの`RetrieveAndGenerate`APIを呼び出し、検索・リランキング・回答生成をまとめて行う薄いLambda関数（[lambda_function.py](../lambda_function.py)）を作成する。
 
 ### 6-1. 関数の作成
 
@@ -102,12 +112,15 @@ Knowledge Baseを`Retrieve`APIで検索し、その結果をもとに`Converse`A
 1. 「コード」タブのコードエディタで、本リポジトリの[lambda_function.py](../lambda_function.py)の内容を`lambda_function.py`に貼り付ける（既存の雛形コードを全て置き換える）
 2. **「Deploy」**ボタンをクリックしてコードを反映する
 
+このコードは検索結果のリランキング（`rerankingConfiguration`）など比較的新しいBedrock KBのパラメータを使う。Lambdaランタイムに同梱のboto3が古いままだと`ParamValidationError: Unknown parameter`で失敗することがある（下記「つまづきポイント」参照）。
+
 ### 6-3. 環境変数を設定する
 
 1. 「設定」タブ→「環境変数」→**「編集」**
-2. 以下の2つを追加する
+2. 以下の3つを追加する
    - `KNOWLEDGE_BASE_ID`: 手順4-10で控えたKnowledge Base ID
    - `MODEL_ARN`: 回答生成に使うモデルのARN（クロスリージョンinference profileを使う場合はそのARN。例: `arn:aws:bedrock:ap-northeast-1:<account_id>:inference-profile/jp.anthropic.claude-sonnet-4-5-...`。`aws bedrock list-inference-profiles`で確認できる）
+   - `RERANK_MODEL_ARN`: リランクモデルのfoundation-model ARN（例: `arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.rerank-v1:0`。アカウント非依存の値で、`aws bedrock list-foundation-models`のmodelIdに`rerank`を含むものから確認できる）
 3. **「保存」**
 
 ### 6-4. タイムアウトを延長する
@@ -122,33 +135,11 @@ Knowledge Baseの検索・生成（特にMermaidフローチャートを生成�
 デフォルトの実行ロールにはCloudWatch Logsへの書き込み権限しかなく、Bedrockを呼び出す権限がない。
 
 1. 「設定」タブ→「アクセス権限」→実行ロールのリンクをクリックしてIAMコンソールへ移動
-2. **「許可を追加」→「インラインポリシーを作成」**
-3. JSONタブに切り替え、以下を入力する（`<knowledge_base_arn>`は手順4で作成したKnowledge BaseのARN、`<model_arn>`は6-3で設定したものと同じ値に置き換える）
+2. **「許可を追加」→「ポリシーをアタッチ」**
+3. 検索欄に`AmazonBedrockFullAccess`と入力し、該当するAWS管理ポリシーにチェックを入れる
+4. **「許可を追加」**をクリック
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "Retrieve",
-      "Effect": "Allow",
-      "Action": ["bedrock:Retrieve"],
-      "Resource": "<knowledge_base_arn>"
-    },
-    {
-      "Sid": "InvokeGenerationModel",
-      "Effect": "Allow",
-      "Action": ["bedrock:InvokeModel", "bedrock:Converse", "bedrock:GetInferenceProfile"],
-      "Resource": [
-        "<model_arn>",
-        "arn:aws:bedrock:*::foundation-model/*"
-      ]
-    }
-  ]
-}
-```
-
-4. ポリシー名を入力（例: `<project>-lambda-policy`）し、**「ポリシーの作成」**
+呼び出すBedrock API（`RetrieveAndGenerate`・埋め込みモデル・生成モデル・リランクモデル）は用途によって必要なアクションが変わりやすく、アクション単位の最小権限ポリシーだと権限不足で都度詰まりやすい。ここでは検証のしやすさを優先し、AWS管理ポリシー`AmazonBedrockFullAccess`を1つアタッチする方式にしている（`terraform/api.tf`の`aws_iam_role_policy_attachment.base_lambda_bedrock`と同じ方式）。本番運用では利用するAPI・モデルARNを絞ったカスタムポリシーへの置き換えを検討すること。
 
 ## 7. API Gateway（HTTP API）を作成する
 
@@ -255,7 +246,7 @@ curl -X POST https://<invoke_url>/ask \
   -d '{"question": "在宅勤務は週に何日まで使えますか？"}'
 ```
 
-- `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（識別子。現状は会話の文脈保持には使われない）が返ってくればOK
+- `answer`（回答本文）・`sources`（出典のS3 URI一覧）・`sessionId`（Bedrock側が発行するセッションID。次のリクエストに含めると会話の文脈を踏まえた回答になる）が返ってくればOK
 - ブラウザの場合は手順8-4最後で開いたURLからチャット画面で質問する
 - エラーが出る場合は「つまづきポイント」（下記）を参照
 
@@ -263,7 +254,8 @@ curl -X POST https://<invoke_url>/ask \
 
 | つまづきポイント | ヒント |
 |---|---|
-| Lambdaが`AccessDeniedException`を返す | 手順6-5のインラインポリシーが正しく実行ロールに付与されているか確認する |
+| Lambdaが`AccessDeniedException`を返す | 手順6-5で`AmazonBedrockFullAccess`ポリシーが実行ロールに正しくアタッチされているか確認する |
+| Lambdaが`ParamValidationError: Unknown parameter`を返す | ランタイム同梱のboto3/botocoreが古く、`rerankingConfiguration`等の新しいパラメータを認識できていない。Lambdaの「レイヤー」に`boto3`・`botocore`の新しいバージョンを含むレイヤーを追加する（`requirements.txt`に固定バージョンあり） |
 | Lambdaがタイムアウトする | 手順6-4でタイムアウトを30秒に延長したか確認する |
 | API Gatewayから呼び出すと403/500になる | Lambda関数側にAPI Gatewayからの呼び出しを許可するリソースベースポリシーが必要（コンソールでLambda統合を作成した場合は自動付与されるが、権限エラーが出る場合はLambdaの「設定」→「アクセス権限」→「リソースベースのポリシーステートメント」でAPI Gatewayからの`lambda:InvokeFunction`が許可されているか確認する） |
 | ブラウザから呼び出すとCORSエラーになる | 手順7-4のCORS設定（特に`Access-Control-Allow-Headers`に`content-type`が含まれているか）を確認する |
@@ -280,7 +272,7 @@ curl -X POST https://<invoke_url>/ask \
 1. フロント公開用S3バケット（オブジェクトを空にしてから削除）
 2. API Gateway（API本体を削除）
 3. Lambda関数
-4. LambdaのIAMロール（インラインポリシーごと削除される）
+4. LambdaのIAMロール（ロールを削除すればアタッチした管理ポリシーの関連付けも解除される）
 5. Bedrock Knowledge Base（データソースごと削除される）
 6. Knowledge BaseのIAMロール
 7. S3 Vectorsのインデックス→ベクトルバケット

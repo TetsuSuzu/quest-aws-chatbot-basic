@@ -40,7 +40,7 @@ data "aws_iam_policy_document" "kb_permissions" {
     resources = [var.embedding_model_arn]
   }
 
-  # スキャン画像PDF(試験問題など、テキストレイヤーを持たないPDF)を解析するための
+  # 画面仕様書PDF(スクリーンショット画像で、テキストレイヤーを持たないPDF)を解析するための
   # マルチモーダルパースに使う。generation_model_arnはクロスリージョンinference profileの
   # ため、profile ARN自体とルーティング先のfoundation-model ARNの両方への権限が必要
   statement {
@@ -120,8 +120,11 @@ resource "aws_bedrockagent_data_source" "documents" {
       bedrock_foundation_model_configuration {
         model_arn = var.generation_model_arn
 
+        # 画面仕様書（Excelにスクリーンショットを貼り付けPDFエクスポートしたもの）という
+        # 本リポジトリの実際のドキュメント特性に合わせた書き起こし指示。
+        # 要約・翻訳をさせず原文どおり日本語で書き起こすことが、検索精度に直結するため重要
         parsing_prompt {
-          parsing_prompt_string = "Extract and transcribe all text and visual content from the document."
+          parsing_prompt_string = "このページは画面仕様書のスクリーンショットを含む日本語の業務文書です。ページに写っているテキストを要約・翻訳・言い換えをせず、原文どおり日本語のまま全て書き起こしてください。画面名・入力項目のラベル・選択肢・ボタン名・注記など、画面上に表示されている文言を漏れなく書き起こしてください。表がある場合は行と列の対応関係が分かる形で書き起こしてください。画面ID(例: SCR-003)など識別子となる番号・記号は省略せず保持してください。"
         }
       }
     }

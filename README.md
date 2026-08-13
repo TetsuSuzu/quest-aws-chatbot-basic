@@ -30,6 +30,7 @@ flowchart TB
 
     subgraph BedrockBox["Amazon Bedrock"]
         KB["Knowledge Base"]
+        Rerank["リランクモデル\n(Amazon Rerank)"]
         Model["基盤モデル\n(Claude / Titan Embeddings)"]
     end
 
@@ -37,6 +38,7 @@ flowchart TB
     S3V[("S3 Vectors\nベクトルバケット・インデックス")]
 
     WebUser --> S3Front --> APIGW --> Lambda --> KB
+    KB --> Rerank
     S3Docs -- "同期(Sync)" --> KB
     KB --> S3V
     KB --> Model
@@ -50,6 +52,7 @@ flowchart TB
 | Amazon S3 Vectors | ベクトルストア（埋め込みベクトルの保存先） | 保存量・クエリ課金で低コスト。OpenSearch Serverlessのような常時起動コストが発生しない |
 | Amazon Bedrock Knowledge Base | RAGの中核。Embedding・検索・回答生成を統合 | 最小工数で構築可 |
 | 基盤モデル（Claude等） | 回答生成・埋め込み生成 | 事前にモデルアクセスの有効化が必要 |
+| リランクモデル（Amazon Rerank） | 検索結果の並べ替え（reranking） | 事前にモデルアクセスの有効化が必要 |
 | IAM ロール | Knowledge BaseがS3・S3 Vectors・基盤モデルを操作するための権限 | 最小権限で付与 |
 
 ## 禁止事項（社内ルール／セキュリティ観点）
@@ -90,7 +93,7 @@ flowchart TB
 1. マネジメントコンソールで **Amazon Bedrock** を開く
 2. 左メニュー下部の**「モデルアクセス」**をクリック
 3. **「モデルアクセスを管理」**（または「特定のモデルを有効にする」）をクリック
-4. 埋め込みモデル（**Titan Text Embeddings V2**）と回答生成モデル（**Claude**、選択可能なバージョンでよい）にチェックを入れる
+4. 埋め込みモデル（**Titan Text Embeddings V2**）・回答生成モデル（**Claude**、選択可能なバージョンでよい）・リランクモデル（**Amazon Rerank 1.0**）にチェックを入れる
 5. 「次へ」→ 利用規約を確認し**「送信」**。ステータスが「アクセス許可済み」になるまで数分待つ
 
 ### 4. Bedrock Knowledge Baseを作成する
@@ -100,7 +103,7 @@ flowchart TB
 3. **IAM権限**: 「新しいサービスロールを作成して使用する」（推奨、必要な権限が自動付与される）を選択
 4. データソースのタイプで**「S3」**を選択 → 次へ
 5. データソース名を入力し、**S3 URI**で手順1で作成したバケットを指定（「参照」から選択可能）
-6. チャンク戦略・パース戦略はデフォルトのままでよい → 次へ
+6. チャンク戦略はデフォルトのままでよい。**パース戦略**は「基盤モデルを使用した解析」（Foundation model parsing）を選び、画像内テキストの読み取りに使うモデル（Claude等）を指定する。**カスタム解析指示（parsing prompt）**の欄には下記「補足」に記載の指示文を入力する（スキャン画像PDFやスクショ付き文書を扱う場合に必須。デフォルトのパーサーだと画像内の文字が失われる） → 次へ
 7. **埋め込みモデル**: 「Titan Text Embeddings V2」を選択し、埋め込みの次元数を手順2のベクトルインデックスと**同じ値（例: 1024）**に設定する
 8. **ベクトルストア**: 「既存のベクトルストアを使用する」→ ストアの種類で**「Amazon S3 Vectors」**を選択し、手順2で作成したベクトルバケット・ベクトルインデックスを指定する
 9. 「次へ」で設定内容を確認し、**「ナレッジベースを作成」**をクリック（作成に数十秒〜1分程度かかる）
@@ -131,15 +134,12 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 | `sample-docs/01_expense_policy.md` | 経費精算規定（社内サンプル） |
 | `sample-docs/02_remote_work_policy.md` | 在宅勤務規定（社内サンプル） |
 | `sample-docs/03_screen_spec_booking.pdf` | 旅行予約サイトの画面仕様書サンプル（旅行検索〜予約完了までの5画面。スキャン画像PDFのため`BEDROCK_FOUNDATION_MODEL`パースで読み取る） |
-| `sample-docs/gov/*.pdf`（16件） | 観光庁公開の旅行業法関連規定（標準旅行業約款・OTAガイドライン等）。個別の出典は[sample-docs/gov/README.md](sample-docs/gov/README.md)参照 |
-| `sample-docs/gov/exam/*.pdf`（10件） | 地域限定旅行業務取扱管理者試験の過去問題（平成30年度〜令和4年度、問題・正解）。個別の出典は[sample-docs/gov/exam/README.md](sample-docs/gov/exam/README.md)参照 |
 
-以下はKBには取り込まれない（`terraform/s3.tf`が`*.md`/`*.pdf`のみを対象とし、`README.md`は明示的に除外しているため）。
+以下はKBには取り込まれない（`terraform/s3.tf`が`*.md`/`*.pdf`のみを対象としているため）。
 
 | ファイル | 位置づけ |
 |---|---|
 | `sample-docs/03_screen_spec_booking.xlsx` | 画面仕様書の元データ（スクショ貼付Excel）。参考資料 |
-| `sample-docs/gov/README.md` / `sample-docs/gov/exam/README.md` | 出典管理用のメタ文書 |
 
 **社内業務（経費精算・在宅勤務）**
 - 経費精算はどのように申請すればいいですか？
@@ -150,18 +150,6 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 - 在宅勤務の事前申請はいつまでに必要ですか？
 - 海外からの在宅勤務は可能ですか？
 - 在宅勤務手当はいくらですか？
-
-**旅行業法・規定（観光庁公開資料、`sample-docs/gov/`）**
-- 標準旅行業約款とは何ですか？
-- 募集型企画旅行契約と受注型企画旅行契約の違いは何ですか？
-- 旅行業法施行規則で観光庁長官が定める区域とはどのような場所ですか？
-- オンライン旅行取引の表示等に関するガイドライン（OTAガイドライン）ではどのような表示が求められていますか？
-- インターネット取引を利用する旅行業務について、どのような取扱いが定められていますか？
-- 旅行業法第2条に規定する「旅行業」とはどのような業務を指しますか？
-- 自治体が関与するツアーの実施は旅行業法上どのように扱われますか？
-- 旅行業務及び旅行サービス手配業務におけるテレワークの実施基準を教えてください
-- 第三種旅行業務及び地域限定の範囲はどのように定められていますか？
-- 旅行業法における申請に対する処分の審査基準・標準処理期間はどうなっていますか？
 
 **画面仕様書（旅行予約サイトの予約入力UIサンプル、`sample-docs/03_screen_spec_booking.pdf`）**
 - 旅行検索画面ではどんな条件で検索できますか？
@@ -179,20 +167,12 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 - 予約内容の確認メールはどこから再送できますか？
 - SCR-003（予約者情報入力画面）からSCR-002（プラン一覧画面）へ戻ることはできますか？
 
-**旅行業務取扱管理者試験（過去問、`sample-docs/gov/exam/`）**
-- 地域限定旅行業務取扱管理者試験にはどのような科目がありますか？
-- 令和4年度の試験問題にはどのような内容が含まれていますか？
-- 旅程管理研修の内容及び方法の基準はどうなっていますか？
-- 旅行サービス手配業務取扱管理者研修の内容を教えてください
-- 地域限定旅行業務取扱管理者試験の合格基準は何点ですか？
-- 令和2年度と令和3年度の試験内容にはどのような違いがありますか？
-
 **会話継続（マルチターン）について**
 
-現在の実装（`retrieve` + `converse`）は文脈を保持しないため、以下のような指示語を含む続けての質問には対応できない（既知の制約。詳細は下記「`sessionId`とマルチターン対応について」参照）。
+現在の実装（`RetrieveAndGenerate`）はBedrock側がセッションを管理するため、Webフロントがレスポンスの`sessionId`を次のリクエストに渡すことで、以下のような指示語を含む続けての質問にも対応できる（詳細は下記「`sessionId`とマルチターン対応について」参照）。
 ```
 1. 経費精算の申請期限はいつまでですか？
-2. （続けて）それは何日以内ですか？ ← 1.の文脈を踏まえた回答にはならない
+2. （続けて）それは何日以内ですか？ ← 1.の文脈を踏まえて回答される
 ```
 
 ## つまづきポイントとヒント
@@ -205,7 +185,7 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 | 検索させたい | Bedrock Knowledge Baseを作成し、データソースにS3を指定する |
 | データソース設定 | データソースにドキュメント用S3バケットを指定する |
 | データを反映したい | 作成後「同期（Sync）」を実行してベクトル化・格納する |
-| モデルが使えない | 事前にBedrockのモデルアクセス（埋め込み／生成モデル）を有効化する |
+| モデルが使えない | 事前にBedrockのモデルアクセス（埋め込み／生成／リランクモデル）を有効化する |
 | 動作確認したい | Knowledge Baseの「テスト」画面でチャット確認する |
 | 権限エラーが出る | IAMロールにS3読み取り＋S3 Vectors操作＋Bedrock実行権限を付与する |
 | **同期がほぼ全件失敗する（★重要）** | ベクトルインデックスの`non-filterable metadata keys`に`AMAZON_BEDROCK_TEXT`と`AMAZON_BEDROCK_METADATA`の両方を含めているか確認する。片方だけだと「フィルタ可能メタデータは1ベクトルあたり2048バイトまで」という制限にすぐ達し、ほとんどのチャンクが取り込み失敗する（実機検証で確認済みの実例） |
@@ -215,7 +195,23 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 
 画面仕様書のように「Excelにスクリーンショット画像を貼り付けた」ドキュメントは社内でよく使われる形式だが、そのままS3にアップロードしてもBedrock KBの標準パーサーはセルに貼り付けた画像を認識できず、テキスト（セルの文字値）だけが抽出されて画像の内容は失われる。
 
-**対処法**: 取り込み前にPDFへエクスポートする。PDF化すると各ページが画像として扱われるため、本リポジトリで既に設定している`BEDROCK_FOUNDATION_MODEL`パース戦略（[terraform/bedrock_kb.tf](terraform/bedrock_kb.tf)）により、スクリーンショット内の文言までモデルが読み取ってテキスト化してくれる（`sample-docs/gov/`のスキャン画像PDFと同じ仕組み）。
+**なぜ標準パーサーでは読めないのか**: Bedrock KBの標準パーサーはPDF・Officeファイルの**テキストレイヤー（埋め込まれた文字データ）**しか抽出できない。Excelのセルに貼り付けた画像は「絵」でありテキストレイヤーを持たないため、標準パーサーでは画像の中身（スクショに写っている文字）は一切読み取れず、周囲のセルの文字値だけが抽出される。ページ全体が画像だけの場合は「no text content found」として丸ごとスキップされることもある。
+
+**対処法**: 取り込み前にPDFへエクスポートする。PDF化すると各ページが画像として扱われるようになる（この時点ではまだテキスト化されていない）。その上で、本リポジトリで既に設定している**パース戦略を`BEDROCK_FOUNDATION_MODEL`（基盤モデルを使用した解析）**にすることで、ビジョン対応の基盤モデル（Claude）に各ページ画像を渡し、指定した指示文（parsing prompt）に従ってOCR的に文字起こしさせられる（[terraform/bedrock_kb.tf](terraform/bedrock_kb.tf)）。
+
+**実際に使っている指示文（parsing prompt）**: 単に「テキストを抽出して」という汎用的な指示だと、モデルが内容を要約・翻訳してしまったり、画面キャプチャ内の項目名を書き落としたりすることがある。本リポジトリの実データ（画面仕様書のスクショ）に合わせて、以下のように具体的に指示している。
+
+```
+このページは画面仕様書のスクリーンショットを含む日本語の業務文書です。
+ページに写っているテキストを要約・翻訳・言い換えをせず、原文どおり日本語のまま全て書き起こしてください。
+画面名・入力項目のラベル・選択肢・ボタン名・注記など、画面上に表示されている文言を漏れなく書き起こしてください。
+表がある場合は行と列の対応関係が分かる形で書き起こしてください。
+画面ID(例: SCR-003)など識別子となる番号・記号は省略せず保持してください。
+```
+
+- 「要約・翻訳・言い換えをしない」ことを明示しているのは、モデルが気を利かせて内容を圧縮・意訳してしまうと、検索時にユーザーの質問文と表記が一致せずヒットしにくくなるため
+- 「画面名・入力項目のラベル・選択肢・ボタン名」を具体的に列挙しているのは、`sample-docs/03_screen_spec_booking.pdf`のような画面仕様書で、単なる「テキストを書き起こして」という指示だと画面キャプチャ内の細かい項目（ボタン名や注記等）が省略されやすいため
+- 「画面ID」の保持を指示しているのは、「SCR-003からSCR-002へ戻れますか？」のような画面IDを含む質問にも正しく回答できるようにするため
 
 サンプルとして、旅行予約サイトの予約入力UI（旅行検索〜予約完了までの5画面）の画面仕様書を以下の2つの形式で用意している。
 
@@ -257,7 +253,7 @@ Knowledge Baseに実際に取り込まれている（≒`terraform/s3.tf`がS3�
 Bedrockコンソールのテスト画面は使わず、ブラウザから質問できる**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントで動作確認する（`terraform/`で自動デプロイされる、構成図は上記「推奨アーキテクチャ」を参照）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
 
 - `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面
-- `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge Baseを`Retrieve`で検索し、その結果をもとに`Converse`で回答を生成する薄いLambda
+- `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge Baseの`RetrieveAndGenerate`を呼び出し、検索・リランキング・回答生成をまとめて行う薄いLambda
 - フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
 
 ## `lambda_function.py`の解説
@@ -269,99 +265,117 @@ Bedrockコンソールのテスト画面は使わず、ブラウザから質問�
 ```python
 import json
 import os
-import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
-bedrock_runtime = boto3.client("bedrock-runtime")
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
 MODEL_ARN = os.environ["MODEL_ARN"]
+RERANK_MODEL_ARN = os.environ["RERANK_MODEL_ARN"]
 ```
 
-- `boto3.client("bedrock-agent-runtime")`はKnowledge Baseへの検索（`retrieve`）専用のAPIクライアント。`boto3.client("bedrock-runtime")`は基盤モデルの呼び出し（`converse`）専用のクライアントで、両者は別物である点に注意（KB自体の作成・管理を行う`bedrock-agent`ともさらに別）
-- 当初は`bedrock_agent_runtime.retrieve_and_generate()`のみで検索と生成をまとめて行っていたが、本リポジトリで作成するKnowledge Baseは**マネージド型（ベクトルストアの管理をAWSに一任するタイプ）**であり、`RetrieveAndGenerate`APIはマネージド型では未対応（`ValidationException: This operation is not supported for managed knowledge bases`）。そのため「検索は`retrieve`、生成は`converse`」の2段階に分離している
-- `KNOWLEDGE_BASE_ID`・`MODEL_ARN`はLambdaの環境変数から取得する（`terraform/api.tf`でLambdaリソースに設定済み）。ハードコーディングせず環境変数経由にすることで、KBやモデルを差し替えてもコード変更なしで対応できる
+- `boto3.client("bedrock-agent-runtime")`は、Knowledge Baseへの検索・回答生成をまとめて行う`retrieve_and_generate`専用のAPIクライアント（KB自体の作成・管理を行う`bedrock-agent`や、基盤モデルを直接呼び出す`bedrock-runtime`とはいずれも別物）
+- 本リポジトリのKnowledge Baseは**customer-managed型（ベクトルストアにAmazon S3 Vectorsを自前で指定するタイプ）**であり、この型では`RetrieveAndGenerate`APIが正式にサポートされている（AWSがベクトルストアの管理まで丸ごと引き受ける「マネージド型」では非対応で`ValidationException`になるが、本構成では該当しない）。そのため検索・リランキング・生成を1回のAPI呼び出しにまとめられる
+- `KNOWLEDGE_BASE_ID`・`MODEL_ARN`・`RERANK_MODEL_ARN`はLambdaの環境変数から取得する（`terraform/api.tf`でLambdaリソースに設定済み）。ハードコーディングせず環境変数経由にすることで、KB・生成モデル・リランクモデルを差し替えてもコード変更なしで対応できる
+- `ClientError`は、後述のセッション切れリトライ処理で使う
 - クライアントの初期化をハンドラー関数の外（モジュールレベル）で行っているのは、Lambdaの実行環境が再利用される際（コールドスタートではない2回目以降の呼び出し）にクライアントを使い回し、初期化コストを省くため
 
-### システムプロンプト
+### プロンプトテンプレート
 
 ```python
-SYSTEM_PROMPT = """あなたはJTB情報管理ツールに関する社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
+# $output_format_instructions$は出典(citations)を出力させるための必須プレースホルダー
+PROMPT_TEMPLATE = """あなたはJTB情報管理ツールに関する社内ナレッジチャットボットです。以下の検索結果のみを根拠に、ユーザーの質問に日本語で回答してください。検索結果に答えがない場合は、その旨を伝えてください。
 
-JTB情報管理ツールの手続き・申請フロー・プロセスに関する質問(例:「〜の申請手順は?」「〜の流れを教えて」)の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。"""
+JTB情報管理ツールの手続き・申請フロー・プロセスに関する質問(例:「〜の申請手順は?」「〜の流れを教えて」)の場合は、回答の最後にMermaid記法のフローチャートを ```mermaid ``` のコードブロックで追加してください。単純な事実確認の質問には無理にフローチャートを付けないでください。
+
+検索結果:
+$search_results$
+
+$output_format_instructions$"""
 ```
 
-- `RetrieveAndGenerate`を使っていた頃は`$search_results$`・`$output_format_instructions$`というBedrock側の予約プレースホルダーを含んだプロンプトテンプレートを渡す必要があったが、`converse`は単なるチャットAPIなのでその制約はない。検索結果は下記`_generate_answer`内でユーザーメッセージに直接埋め込む
-- Mermaidフローチャートを促す指示文は従来どおり（詳細は下記「回答内のMermaidフローチャート自動生成」参照）
+- `retrieve_and_generate`に渡すプロンプトテンプレートには、Bedrock側の予約プレースホルダーを含める必要がある。`$search_results$`は検索結果チャンクの差し込み位置、`$output_format_instructions$`は出典（`citations`）を正しく出力させるために必須のプレースホルダーで、省略すると`citations`が空になる
+- Mermaidフローチャートを促す指示文は、検索結果や出力形式に関する指示とは独立して機能する（詳細は下記「回答内のMermaidフローチャート自動生成」参照）
 
-### `_retrieve` — Knowledge Base検索
+### `_retrieve_and_generate` — 検索・リランク・生成をまとめて呼び出す
 
 ```python
-def _retrieve(question: str) -> list[dict]:
-    response = bedrock_agent_runtime.retrieve(
-        knowledgeBaseId=KNOWLEDGE_BASE_ID,
-        retrievalQuery={"text": question},
-        retrievalConfiguration={
-            "managedSearchConfiguration": {"numberOfResults": 6},
+def _retrieve_and_generate(question: str, session_id: str | None):
+    kwargs = {}
+    if session_id:
+        kwargs["sessionId"] = session_id
+
+    return bedrock_agent_runtime.retrieve_and_generate(
+        input={"text": question},
+        retrieveAndGenerateConfiguration={
+            "type": "KNOWLEDGE_BASE",
+            "knowledgeBaseConfiguration": {
+                "knowledgeBaseId": KNOWLEDGE_BASE_ID,
+                "modelArn": MODEL_ARN,
+                "generationConfiguration": {
+                    "promptTemplate": {"textPromptTemplate": PROMPT_TEMPLATE},
+                },
+                # このKB(S3 Vectors、customer-managed型)ではvectorSearchConfigurationが正しい。
+                # managedSearchConfigurationはAWSが検索設定を丸ごと管理する別タイプのKB専用で、
+                # このKBに使うとValidationExceptionになる。
+                #
+                # 似た項目名を持つ複数の行・複数の資料が混在する表形式データでは、
+                # ベクトル類似度だけの上位絞り込みだと本命のチャンクが漏れることがあるため、
+                # 候補は広め(20件)に取ってからリランキングモデルで上位10件に絞り込む
+                "retrievalConfiguration": {
+                    "vectorSearchConfiguration": {
+                        "numberOfResults": 20,
+                        "rerankingConfiguration": {
+                            "type": "BEDROCK_RERANKING_MODEL",
+                            "bedrockRerankingConfiguration": {
+                                "modelConfiguration": {"modelArn": RERANK_MODEL_ARN},
+                                "numberOfRerankedResults": 10,
+                            },
+                        },
+                    },
+                },
+            },
         },
+        **kwargs,
     )
-    return response.get("retrievalResults", [])
 ```
 
-- `retrieve`はKnowledge Baseに対して検索のみを行うAPI（生成は行わない）。`numberOfResults`で取得するチャンク数の上限を指定する（多すぎるとプロンプトが肥大化してコスト・レイテンシが増え、少なすぎると根拠不足になるためのトレードオフ）
-- `retrievalConfiguration`は`vectorSearchConfiguration`（Customer-managed型。自前のOpenSearch Serverless等を使う場合）と`managedSearchConfiguration`（Managed型。本リポジトリで作成しているのはこちら）の2種類があり、KBの種類に合わない方を指定すると`ValidationException`になる。フィールド名は違うが中身（`numberOfResults`等）はほぼ同じ
-- 戻り値の各要素は`content.text`（チャンク本文）と`location.s3Location.uri`（出典）などを持つ
+- 検索（ベクトル検索→リランキング）・プロンプトへの検索結果の差し込み・回答生成を、この1回のAPI呼び出しの中でBedrockが行う
+- `retrievalConfiguration`には`vectorSearchConfiguration`（customer-managed型。本リポジトリのようにS3 Vectors等、ベクトルストアの実体を自分で指定する場合）と`managedSearchConfiguration`（AWSが検索設定を丸ごと管理する別タイプのKB専用）の2種類があり、KBの種類に合わない方を指定すると`ValidationException`になる
+- `numberOfResults: 20`でベクトル検索の候補を広めに取り、`rerankingConfiguration`でリランキングモデル（`RERANK_MODEL_ARN`）にかけて`numberOfRerankedResults: 10`件まで絞り込む。似た項目名を持つ複数の行・複数の資料が混在する表形式データ（画面仕様書等）では、ベクトル類似度だけの上位絞り込みだと本命のチャンクが漏れることがあるため、候補を広く取ってからリランキングで精度を上げている
+- `session_id`が渡された場合のみ`kwargs`に`sessionId`を積む。`retrieve_and_generate`は`sessionId`を渡すと同じ会話の続きとして扱い、渡さなければ新規セッションを開始する
 
-### `_build_search_results_text` / `_generate_answer` — プロンプト組み立てと回答生成
-
-```python
-def _build_search_results_text(results: list[dict]) -> str:
-    blocks = []
-    for i, r in enumerate(results, start=1):
-        text = r.get("content", {}).get("text", "")
-        uri = r.get("location", {}).get("s3Location", {}).get("uri", "")
-        blocks.append(f"[検索結果{i}] (出典: {uri})\n{text}")
-    return "\n\n".join(blocks) if blocks else "(該当する検索結果はありませんでした)"
-
-
-def _generate_answer(question: str, search_results_text: str) -> str:
-    user_message = f"検索結果:\n{search_results_text}\n\n質問:\n{question}"
-    response = bedrock_runtime.converse(
-        modelId=MODEL_ARN,
-        system=[{"text": SYSTEM_PROMPT}],
-        messages=[{"role": "user", "content": [{"text": user_message}]}],
-    )
-    return response["output"]["message"]["content"][0]["text"]
-```
-
-- `_build_search_results_text`は、`RetrieveAndGenerate`がBedrock内部で自動的にやっていた「検索結果をプロンプトに整形する」処理を自前で行う部分。各チャンクに出典URIを添えて番号付きで並べる
-- 検索結果が0件（該当ドキュメントなし）の場合でも空文字列を渡さず、「該当する検索結果はありませんでした」という文言を入れることで、モデルが検索結果欄を無視して幻覚（hallucination）で答えてしまうリスクを減らしている
-- `_generate_answer`は`converse` APIで、`system`にシステムプロンプト、`messages`に検索結果込みのユーザーメッセージを渡して回答を生成する。`converse`はBedrockの複数モデル間で共通化された会話APIで、モデルごとに異なる`invoke_model`のリクエスト形式を意識せずに済む
-
-### `ask_knowledge_base` — 検索・生成・出典抽出の統合
+### `ask_knowledge_base` — セッション管理と出典抽出
 
 ```python
 def ask_knowledge_base(question: str, session_id: str | None) -> dict:
-    results = _retrieve(question)
-    search_results_text = _build_search_results_text(results)
-    answer = _generate_answer(question, search_results_text)
+    try:
+        response = _retrieve_and_generate(question, session_id)
+    except ClientError as exc:
+        # セッションが期限切れ・無効な場合は新規セッションとしてやり直す
+        if session_id and "session" in str(exc).lower():
+            response = _retrieve_and_generate(question, None)
+        else:
+            raise
 
     sources = sorted({
-        r["location"]["s3Location"]["uri"]
-        for r in results
-        if "s3Location" in r.get("location", {})
+        ref["location"]["s3Location"]["uri"]
+        for citation in response.get("citations", [])
+        for ref in citation.get("retrievedReferences", [])
+        if "s3Location" in ref.get("location", {})
     })
     return {
-        "answer": answer,
+        "answer": response["output"]["text"],
         "sources": sources,
-        "sessionId": session_id or str(uuid.uuid4()),
+        "sessionId": response["sessionId"],
     }
 ```
 
-- **出典の抽出**: `RetrieveAndGenerate`時代は回答の`citations`（実際に回答に使われた根拠のみ）から出典を抽出していたが、`retrieve`+`converse`構成ではモデルの回答と検索結果が別APIの戻り値になるため、正確な対応付けはできない。代わりに`_retrieve`で取得した検索結果全件（＝回答生成のプロンプトに含めたチャンク全て）を出典として返している。`{...}`という集合内包表記で重複を自動的に除去し、`sorted()`で並び順を安定させている
-- **`sessionId`について（重要な制約）**: `retrieve`・`converse`はいずれもステートレスなAPIで、`RetrieveAndGenerate`が持っていたような「Bedrock側で会話履歴を保持する`sessionId`」の仕組みは存在しない。ここで返している`sessionId`はフロントエンドとのインターフェース（レスポンス形状）を変えずに済ませるための識別子にすぎず、**次の質問に渡しても文脈は一切引き継がれない**。「それは何日以内ですか？」のような指示語を含む質問には対応できなくなっている点に注意（マルチターン対応を実装する場合は、フロントから会話履歴を送る、あるいはDynamoDB等で履歴を管理して`converse`の`messages`に積み直す、といった作り込みが別途必要）
+- **セッション切れのリトライ**: Bedrockのセッションには保持期限があり、古い`sessionId`を渡すと`ClientError`になることがある。エラーメッセージに`session`という文字列が含まれる場合はセッション切れとみなし、`session_id=None`（新規セッション）で1回だけ自動的に再試行する。それ以外の例外はそのまま呼び出し元に伝播させる
+- **出典の抽出**: `response["citations"]`には、実際に回答の根拠として使われたチャンクだけが入っている（検索でヒットした全件ではない）。各citationの`retrievedReferences`から出典URIを取り出し、集合内包表記で重複を自動的に除去した上で`sorted()`により並び順を安定させている
+- **`sessionId`について**: `retrieve_and_generate`はBedrock側で会話履歴を保持する`sessionId`を発行する。レスポンスの`sessionId`をそのまま返し、フロントエンドが次のリクエストに含めることで、Bedrock側が保持している会話履歴を踏まえた回答が返るようになる（`frontend/index.html`は受け取った`sessionId`を変数に保持し、次の質問と一緒に送信している）。「それは何日以内ですか？」のような指示語を含む続けての質問にも対応できる
 
 ### `_response` — API Gatewayレスポンスの整形
 
@@ -370,7 +384,7 @@ def _response(status_code: int, body: dict) -> dict:
     return {
         "statusCode": status_code,
         "headers": {
-            "Content-Type": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
             "Access-Control-Allow-Origin": "*",
         },
         "body": json.dumps(body, ensure_ascii=False),
@@ -379,6 +393,7 @@ def _response(status_code: int, body: dict) -> dict:
 
 - API Gatewayの**Lambdaプロキシ統合**（`payload_format_version = "2.0"`）が期待する形式（`statusCode`・`headers`・`body`を持つ辞書）にレスポンスを整形するだけの小さなヘルパー
 - `Access-Control-Allow-Origin: *`はCORS対応。S3静的website hostingのオリジンとAPI Gatewayのオリジンが異なる（別ドメイン）ため、これがないとブラウザがレスポンスをブロックする
+- `Content-Type`に`charset=utf-8`を明示し、クライアント側での文字化けを避けている
 - `json.dumps(..., ensure_ascii=False)`により、日本語をUnicodeエスケープ（`\uXXXX`）せずそのままUTF-8で出力する（可読性のため）
 
 ### `lambda_handler` — エントリポイント
@@ -425,23 +440,16 @@ curl -X POST https://<api_endpoint>/ask \
 
 `terraform apply`後の`frontend_url`出力（`http://`を付けてブラウザで開く）から動作確認できる。
 
-**`sessionId`とマルチターン対応について（既知の制約）**: 以前は`RetrieveAndGenerate`API標準の`sessionId`機能を使い、DynamoDB等の追加インフラなしで会話の文脈を保持していた。しかし本リポジトリのKnowledge Baseは**マネージド型**であり`RetrieveAndGenerate`自体が使えないため、現在の`retrieve`+`converse`構成ではこの機能は失われている。
+**`sessionId`とマルチターン対応について**: 本リポジトリのKnowledge Baseは**customer-managed型（S3 Vectors）**であり`RetrieveAndGenerate`が使えるため、Bedrock標準の`sessionId`機能でDynamoDB等の追加インフラなしに会話の文脈を保持できる。
 
-- レスポンスの`sessionId`はフロントとのインターフェースを保つために返しているだけの識別子で、次のリクエストに含めても**文脈は一切引き継がれない**（Lambda側は`question`のみを見て毎回独立に検索・生成している）
-- そのため「それは何日以内ですか？」のような指示語を含む続けての質問には正しく回答できない。試す場合は毎回、指示語を使わず質問を完結させること
-
-マルチターン対応が必要になった場合の主な選択肢:
-
-| 方式 | 実装コスト | 会話ログの監査 | 備考 |
-|---|---|---|---|
-| フロントから直近の会話履歴を送る | 低い（`converse`の`messages`に積むだけ） | 不可 | ブラウザを閉じると履歴は消える。手軽だが規模が増えると素朴には限界がある |
-| DynamoDBで履歴を管理 | 高い（履歴の保存・取得・`messages`への組み込みを自前実装） | 可能 | TTLで保持期間を制御可能。品質レビュー・利用状況分析にも使える |
-
-いずれも今回のスコープでは未実装。必要になった時点で追加検討する。
+- Lambdaのレスポンスに含まれる`sessionId`をフロントエンドが次のリクエストのボディに含めて送ると、Bedrock側が保持している会話履歴を踏まえて検索・生成が行われる（`frontend/index.html`は既にこの往復を実装済み）
+- そのため「それは何日以内ですか？」のような指示語を含む続けての質問にも対応できる
+- ただし`sessionId`にはBedrock側の保持期限があり、期限切れ・無効な`sessionId`を渡すと`ClientError`になる。`ask_knowledge_base`内でこの例外を検知した場合は新規セッションとして1回だけ自動リトライする（上記「`ask_knowledge_base`」参照）ため、ユーザーからは会話が途切れて新しい話題として応答される形になる
+- 会話ログの監査・保持期間の制御（TTL等）が必要な場合は、Bedrock標準のセッション管理だけでは対応できないため、別途DynamoDB等での履歴管理を検討する
 
 **回答内のMermaidフローチャート自動生成**: 「経費精算の申請手順を教えてください」のような手続き・フローに関する質問には、テキストの回答に加えてMermaid記法のフローチャートも自動生成される。これは2つの仕組みの組み合わせで実現している。
 
-1. **プロンプトエンジニアリング（`lambda_function.py`）**: `converse`に渡す`SYSTEM_PROMPT`に、「手続き・申請フロー・プロセスに関する質問の場合は、回答の最後にMermaid記法のフローチャートを ` ```mermaid ``` ` のコードブロックで追加してください」という指示を明示的に加えることで、Claude自身が持つMermaid記法の生成能力（学習データに技術文書由来のMermaid記法が含まれているため、指示すれば正しい構文で書ける）を引き出している。何も指示しなければ、モデルは普通のテキストだけで回答し、図は出力しない。
+1. **プロンプトエンジニアリング（`lambda_function.py`）**: `retrieve_and_generate`に渡す`PROMPT_TEMPLATE`に、「手続き・申請フロー・プロセスに関する質問の場合は、回答の最後にMermaid記法のフローチャートを ` ```mermaid ``` ` のコードブロックで追加してください」という指示を明示的に加えることで、Claude自身が持つMermaid記法の生成能力（学習データに技術文書由来のMermaid記法が含まれているため、指示すれば正しい構文で書ける）を引き出している。何も指示しなければ、モデルは普通のテキストだけで回答し、図は出力しない。
 2. **フロントエンドでの描画（`frontend/index.html`）**: モデルの回答はあくまで ` ```mermaid ... ``` ` というプレーンテキストとして返ってくるだけなので、ブラウザ側でこのコードブロックを検出し、[mermaid.js](https://mermaid.js.org/)（CDNから動的importで読み込み）を使って実際の図（SVG）に変換・描画している。CDN読み込みに失敗した場合はダイアグラム機能だけを諦め、チャット自体は通常通り動作するようにしている（静的importだとCDN障害時にスクリプト全体が止まってしまうため）。
 
 この2つのうち片方が欠けても実現しない点に注意（プロンプト指示だけではブラウザ上でコードのまま表示され、フロント側の描画処理だけではモデルがそもそも図を生成しない）。

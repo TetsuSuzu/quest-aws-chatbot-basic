@@ -25,7 +25,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
 }
 
 locals {
-  # sample-docs配下を再帰的に取り込む（gov/配下の観光庁PDFも含む）。
+  # sample-docs配下を再帰的に取り込む。
   # README.md（出典管理用のメタ文書）はRAGデータではないため除外する
   sample_doc_files = setsubtract(
     setunion(
