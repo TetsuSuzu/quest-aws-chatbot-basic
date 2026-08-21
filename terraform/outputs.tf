@@ -15,7 +15,7 @@ output "api_endpoint" {
 }
 
 output "frontend_url" {
-  value = aws_s3_bucket_website_configuration.frontend.website_endpoint
+  value = "https://${aws_amplify_branch.frontend.branch_name}.${aws_amplify_app.frontend.default_domain}"
 }
 
 output "next_steps" {
@@ -23,6 +23,6 @@ output "next_steps" {
     1. データソースを同期する:
        aws bedrock-agent start-ingestion-job --knowledge-base-id ${aws_bedrockagent_knowledge_base.main.id} --data-source-id ${aws_bedrockagent_data_source.documents.data_source_id} --region ${var.aws_region}
     2. Bedrockコンソールの Knowledge Base > ${aws_bedrockagent_knowledge_base.main.id} > テスト画面で質問して動作確認する
-    3. Webフロント(S3静的ホスティング)で確認する: http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}
+    3. Webフロント(Amplify Hosting)で確認する: https://${aws_amplify_branch.frontend.branch_name}.${aws_amplify_app.frontend.default_domain}
   EOT
 }

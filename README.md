@@ -4,7 +4,7 @@
 
 特定の業種・業務に依存せず、社内文書（画面仕様書など）を根拠に問い合わせへ回答する**汎用の社内ナレッジチャットボット**が題材（`sample-docs/`参照）。
 
-この構成は[quest-aws-chatbot](../quest-aws-chatbot)（Aurora・複数パターン・Amplifyフロントエンドまで作り込んだ発展版）の**Basic共通版**にあたる。まずはこちらで最小構成を体験し、時間が余ったチームは発展版の追加ワーク（パターン①②）に進む想定。
+この構成は[quest-aws-chatbot](../quest-aws-chatbot)（Aurora・複数パターンまで作り込んだ発展版）の**Basic共通版**にあたる。まずはこちらで最小構成を体験し、時間が余ったチームは発展版の追加ワーク（パターン①②）に進む想定。
 
 **使用サービス**: Amazon S3 / Amazon S3 Vectors / Amazon Bedrock Knowledge Bases / Titan Embeddings / Claude（Bedrock）/ IAM
 
@@ -23,7 +23,7 @@ flowchart TB
     WebUser["ブラウザ利用者"]
 
     subgraph WebFront["Webフロント"]
-        S3Front["S3静的website hosting\n(frontend/index.html)"]
+        AmplifyFront["AWS Amplify Hosting\n(S3からの手動デプロイ、frontend/index.html)"]
         APIGW["API Gateway (HTTP API)"]
         Lambda["Lambda: ask"]
     end
@@ -37,7 +37,7 @@ flowchart TB
     S3Docs[("Amazon S3\nドキュメント格納")]
     S3V[("S3 Vectors\nベクトルバケット・インデックス")]
 
-    WebUser --> S3Front --> APIGW --> Lambda --> KB
+    WebUser --> AmplifyFront --> APIGW --> Lambda --> KB
     KB --> Rerank
     S3Docs -- "同期(Sync)" --> KB
     KB --> S3V
@@ -258,11 +258,11 @@ xlsxをS3・KBの対象から意図的に除外しているのは、単に「対
 
 ## Webフロントで動作確認する
 
-Bedrockコンソールのテスト画面は使わず、ブラウザから質問できる**Amplifyではなく、S3の静的website hosting**で配信する軽量なフロントで動作確認する（`terraform/`で自動デプロイされる、構成図は上記「推奨アーキテクチャ」を参照）。ビルドパイプラインを持たないHTML1枚構成のため、Amplifyより単純・低コスト。
+Bedrockコンソールのテスト画面は使わず、ブラウザから質問できる**AWS Amplify Hosting**で配信する軽量なフロントで動作確認する（`terraform/`で自動デプロイされる、構成図は上記「推奨アーキテクチャ」を参照）。Gitリポジトリと連携させず、「index.htmlをS3にアップロードし、Amplifyの手動デプロイ（方式: Amazon S3）でそのバケット/プレフィックスを指定してデプロイする」という運用にしている（手順の詳細は[docs/manual_console_setup.md](docs/manual_console_setup.md)の「Webフロントを公開する」参照）。この方式ならフロント用のS3バケットも非公開のまま維持できる（Amplify HostingがバケットポリシーでS3を読み取るだけで、バケット自体を公開する必要がない）。
 
-- `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面
+- `frontend/index.html` — プレーンHTML+JS（ビルド不要）のチャット画面。API呼び出し先の`__API_ENDPOINT__`プレースホルダーを実際のエンドポイントURLに書き換えてからS3にアップロードする
 - `lambda_function.py` + API Gateway（`POST /ask`）— Knowledge Baseの`RetrieveAndGenerate`を呼び出し、検索・リランキング・回答生成をまとめて行う薄いLambda
-- フロント用S3バケットのみ公開設定（ドキュメント用バケットは非公開のまま）
+- フロントデプロイ用S3バケット・ドキュメント用S3バケットのいずれも非公開設定のまま
 
 ## `lambda_function.py`の解説
 
@@ -440,7 +440,7 @@ def _response(status_code: int, body: dict) -> dict:
 ```
 
 - API Gatewayの**Lambdaプロキシ統合**（`payload_format_version = "2.0"`）が期待する形式（`statusCode`・`headers`・`body`を持つ辞書）にレスポンスを整形するだけの小さなヘルパー
-- `Access-Control-Allow-Origin: *`はCORS対応。S3静的website hostingのオリジンとAPI Gatewayのオリジンが異なる（別ドメイン）ため、これがないとブラウザがレスポンスをブロックする
+- `Access-Control-Allow-Origin: *`はCORS対応。Amplify HostingのオリジンとAPI Gatewayのオリジンが異なる（別ドメイン）ため、これがないとブラウザがレスポンスをブロックする
 - `Content-Type`に`charset=utf-8`を明示し、クライアント側での文字化けを避けている
 - `json.dumps(..., ensure_ascii=False)`により、日本語をUnicodeエスケープ（`\uXXXX`）せずそのままUTF-8で出力する（可読性のため）
 
@@ -486,7 +486,7 @@ curl -X POST https://<api_endpoint>/ask \
   -d '{"question": "同行者の氏名はどの画面で入力しますか？"}'
 ```
 
-`terraform apply`後の`frontend_url`出力（`http://`を付けてブラウザで開く）から動作確認できる。
+`terraform apply`後の`frontend_url`出力（Amplify Hostingのドメイン、`https://`で始まる）から動作確認できる。
 
 **`sessionId`とマルチターン対応について**: 本リポジトリのKnowledge Baseは**customer-managed型（S3 Vectors）**であり`RetrieveAndGenerate`が使えるため、Bedrock標準の`sessionId`機能でDynamoDB等の追加インフラなしに会話の文脈を保持できる。
 
@@ -530,6 +530,6 @@ Slackはスラッシュコマンドに対して**3秒以内**にHTTPレスポン
 
 ## この検証用Terraformについて
 
-`terraform/`には、上記手順（Webフロント含む）が実際に機能することを**運営側が事前検証する**ための構成一式（S3バケット・S3 Vectors・Knowledge Base・IAMロール・Lambda・API Gateway・S3静的website hosting）を用意している。**参加者向けではなく、運営が事前にハンズオンの通り実施可能か確認する用途**。
+`terraform/`には、上記手順（Webフロント含む）が実際に機能することを**運営側が事前検証する**ための構成一式（S3バケット・S3 Vectors・Knowledge Base・IAMロール・Lambda・API Gateway・Amplify Hosting）を用意している。**参加者向けではなく、運営が事前にハンズオンの通り実施可能か確認する用途**。
 
 `main`へのpushでGitHub Actionsが自動的に`terraform apply`するCI/CDも組んである（OIDC認証、長期アクセスキー不要）。詳細は[terraform/README.md](terraform/README.md)を参照。

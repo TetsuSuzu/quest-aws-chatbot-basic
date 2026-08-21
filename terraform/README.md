@@ -2,7 +2,7 @@
 
 参加者向け手順書（[../README.md](../README.md)）の内容が実際に機能するかを、運営側が事前に確認するための構成。参加者に配布するものではない。
 
-Knowledge Base本体（S3・S3 Vectors・IAM）に加え、Webフロント（S3静的website hosting）から動作確認できるようLambda・API Gatewayも含めている。
+Knowledge Base本体（S3・S3 Vectors・IAM）に加え、Webフロント（Amplify Hosting、S3からの手動デプロイ）から動作確認できるようLambda・API Gatewayも含めている。
 
 ## CI/CD
 
