@@ -47,9 +47,13 @@ resource "aws_s3_object" "frontend_index" {
 }
 
 # 参照(deploy-with-sdks.md)のサンプルポリシーをベースにしている。
-# ドキュメントはaws:SourceArnをURLエンコード(パーセントエンコード)した値で比較するよう記載しているが、
-# 実機検証の結果それだとAmplify側の実際のリクエストコンテキスト(素のARN文字列)とマッチせず
-# InvalidSourceBucketで失敗したため、エンコードせず素のARN文字列で比較する
+# ドキュメントはaws:SourceArn条件(branch ARN、URLエンコード指定あり)も付与するよう記載しているが、
+# 実機検証したところエンコード有無どちらでもstart-deploymentが
+# UnauthorizedException/InvalidSourceBucketで失敗した。CloudTrailで確認する限り
+# StartDeployment呼び出し自体はAmplify側の検証で完結しており、S3側のデータイベントとして
+# 実際のGetObject/ListBucket呼び出しが記録されないため詳細は追えないが、
+# aws:SourceArn条件を外すと成功したため、confused deputy対策としては
+# aws:SourceAccountのみで妥協する
 data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
   statement {
     sid       = "AllowAmplifyToListPrefix"
@@ -66,12 +70,6 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
       values   = [data.aws_caller_identity.current.account_id]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceArn"
-      values   = [aws_amplify_branch.frontend.arn]
     }
 
     condition {
@@ -96,12 +94,6 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
       values   = [data.aws_caller_identity.current.account_id]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceArn"
-      values   = [aws_amplify_branch.frontend.arn]
     }
   }
 }
