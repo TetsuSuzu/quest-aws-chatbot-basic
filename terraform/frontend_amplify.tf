@@ -118,7 +118,7 @@ resource "null_resource" "frontend_deploy" {
 
   provisioner "local-exec" {
     interpreter = ["bash", "-c"]
-    command     = "aws amplify start-deployment --app-id ${aws_amplify_app.frontend.id} --branch-name ${aws_amplify_branch.frontend.branch_name} --source-url s3://${aws_s3_bucket.frontend_deploy.id}/${local.frontend_deploy_prefix} --source-url-type BUCKET_PREFIX --region ${var.aws_region}"
+    command     = "aws amplify start-deployment --app-id ${aws_amplify_app.frontend.id} --branch-name ${aws_amplify_branch.frontend.branch_name} --source-url s3://${aws_s3_bucket.frontend_deploy.id}/${local.frontend_deploy_prefix}/ --source-url-type BUCKET_PREFIX --region ${var.aws_region}"
   }
 
   depends_on = [aws_s3_bucket_policy.frontend_deploy, aws_s3_object.frontend_index]
