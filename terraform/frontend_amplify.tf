@@ -46,8 +46,10 @@ resource "aws_s3_object" "frontend_index" {
   etag         = md5(replace(file("${path.module}/../frontend/index.html"), "__API_ENDPOINT__", aws_apigatewayv2_stage.main.invoke_url))
 }
 
-# 参照(deploy-with-sdks.md)のサンプルポリシーをそのまま踏襲。
-# aws:SourceArnはドキュメント記載どおりURLエンコード(パーセントエンコード)したbranch ARNを使う点に注意。
+# 参照(deploy-with-sdks.md)のサンプルポリシーをベースにしている。
+# ドキュメントはaws:SourceArnをURLエンコード(パーセントエンコード)した値で比較するよう記載しているが、
+# 実機検証の結果それだとAmplify側の実際のリクエストコンテキスト(素のARN文字列)とマッチせず
+# InvalidSourceBucketで失敗したため、エンコードせず素のARN文字列で比較する
 data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
   statement {
     sid       = "AllowAmplifyToListPrefix"
@@ -69,7 +71,7 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceArn"
-      values   = [urlencode(aws_amplify_branch.frontend.arn)]
+      values   = [aws_amplify_branch.frontend.arn]
     }
 
     condition {
@@ -99,7 +101,7 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceArn"
-      values   = [urlencode(aws_amplify_branch.frontend.arn)]
+      values   = [aws_amplify_branch.frontend.arn]
     }
   }
 }
@@ -113,7 +115,8 @@ resource "aws_s3_bucket_policy" "frontend_deploy" {
 # 明示的に呼び出さない限りAmplify側には反映されない
 resource "null_resource" "frontend_deploy" {
   triggers = {
-    index_etag = aws_s3_object.frontend_index.etag
+    index_etag  = aws_s3_object.frontend_index.etag
+    policy_hash = sha256(data.aws_iam_policy_document.frontend_deploy_amplify_access.json)
   }
 
   provisioner "local-exec" {
