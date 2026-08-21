@@ -53,7 +53,7 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
     sid       = "AllowAmplifyToListPrefix"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = ["${aws_s3_bucket.frontend_deploy.arn}/${local.frontend_deploy_prefix}/*"]
+    resources = [aws_s3_bucket.frontend_deploy.arn]
 
     principals {
       type        = "Service"
