@@ -46,14 +46,13 @@ resource "aws_s3_object" "frontend_index" {
   etag         = md5(replace(file("${path.module}/../frontend/index.html"), "__API_ENDPOINT__", aws_apigatewayv2_stage.main.invoke_url))
 }
 
-# 参照(deploy-with-sdks.md)のサンプルポリシーをベースにしている。
-# ドキュメントはaws:SourceArn条件(branch ARN、URLエンコード指定あり)も付与するよう記載しているが、
-# 実機検証したところエンコード有無どちらでもstart-deploymentが
-# UnauthorizedException/InvalidSourceBucketで失敗した。CloudTrailで確認する限り
-# StartDeployment呼び出し自体はAmplify側の検証で完結しており、S3側のデータイベントとして
-# 実際のGetObject/ListBucket呼び出しが記録されないため詳細は追えないが、
-# aws:SourceArn条件を外すと成功したため、confused deputy対策としては
-# aws:SourceAccountのみで妥協する
+# 参照(deploy-with-sdks.md)のサンプルポリシーはaws:SourceArn/aws:SourceAccount条件を
+# 付与するよう記載しているが、実機検証したところこの条件を付けるとstart-deploymentが
+# 一貫してUnauthorizedException/InvalidSourceBucketで失敗した(SourceArnはURLエンコード
+# 有無どちらでも失敗、SourceAccountのみでも失敗)。CloudTrailで確認する限りS3側の
+# GetObject/ListBucket呼び出しはデータイベントとして記録されないため詳細な原因は
+# 追えないが、これらの条件を完全に外すと成功することを確認済み。
+# そのためconfused deputy対策の条件は付けず、s3:prefixでリスト範囲のみ絞り込む
 data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
   statement {
     sid       = "AllowAmplifyToListPrefix"
@@ -67,15 +66,9 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
     }
 
     condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
-    }
-
-    condition {
-      test     = "StringEquals"
+      test     = "StringLike"
       variable = "s3:prefix"
-      values   = [""]
+      values   = ["${local.frontend_deploy_prefix}/*"]
     }
   }
 
@@ -88,12 +81,6 @@ data "aws_iam_policy_document" "frontend_deploy_amplify_access" {
     principals {
       type        = "Service"
       identifiers = ["amplify.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
     }
   }
 }
