@@ -124,6 +124,7 @@ data "aws_iam_policy_document" "github_actions_permissions" {
       "bedrock:*",
       "lambda:*",
       "apigateway:*",
+      "amplify:*",
       "logs:*",
       "iam:GetRole", "iam:CreateRole", "iam:DeleteRole", "iam:TagRole",
       "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy",
